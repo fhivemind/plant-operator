@@ -1,0 +1,80 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: plants.operator.cisco.io
+spec:
+  group: operator.cisco.io
+  names:
+    kind: Plant
+    listKind: PlantList
+    plural: plants
+    singular: plant
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Plant is the Schema for the plants API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PlantSpec defines the desired state of Plant
+            properties:
+              annotations:
+                description: ResourceAnnotations specifies custom annotations to add
+                  to various resources. Use this field for resource customization.
+                properties:
+                  deployment:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  ingress:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  pod:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  service:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+              host:
+                description: Host defines the domain name of a network host where
+                  the deployed image will be accessible. Follows RFC 3986 standard.
+                type: string
+              image:
+                description: Image specifies the image use for Deployment containers
+                type: string
+              replicas:
+                description: Replicas defines the number of desired pods to deploy.
+                  Defaults to 1.
+                format: int32
+                minimum: 1
+                type: integer
+            type: object
+          status:
+            description: PlantStatus defines the observed state of Plant
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

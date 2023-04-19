@@ -25,11 +25,33 @@ import (
 
 // PlantSpec defines the desired state of Plant
 type PlantSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Image specifies the image use for Deployment containers
+	//+kubebuilder:validation:Required
+	Image string `json:"image,omitempty"`
 
-	// Foo is an example field of Plant. Edit plant_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Replicas defines the number of desired pods to deploy. Defaults to 1.
+	//+kubebuilder:validation:Minimum=1
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Host defines the domain name of a network host where the deployed image will be accessible.
+	// Follows RFC 3986 standard.
+	//+kubebuilder:validation:Required
+	Host string `json:"host,omitempty"`
+
+	// ResourceAnnotations specifies custom annotations to add to various resources.
+	// Use this field for resource customization.
+	// +optional
+	ResourceAnnotations *ResourceAnnotations `json:"annotations"`
+}
+
+// ResourceAnnotations defines annotations for various resources managed by Plant.
+// This field can be used for additional resource customization.
+type ResourceAnnotations struct {
+	Deployment map[string]string `json:"deployment,omitempty"`
+	Pod        map[string]string `json:"pod,omitempty"`
+	Service    map[string]string `json:"service,omitempty"`
+	Ingress    map[string]string `json:"ingress,omitempty"`
 }
 
 // PlantStatus defines the observed state of Plant
