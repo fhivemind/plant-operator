@@ -50,6 +50,7 @@ type PlantReconciler struct {
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking,resources=ingress,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -100,7 +101,7 @@ func (r *PlantReconciler) ErrorHandle(ctx context.Context, plant *apiv1.Plant, e
 func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (ctrl.Result, error) {
 	switch plant.Status.State {
 	case "": // change state to "Processing"
-		return ctrl.Result{}, r.UpdateStatusState(ctx, plant, apiv1.StateProcessing)
+		return ctrl.Result{Requeue: true}, r.UpdateStatusState(ctx, plant, apiv1.StateProcessing)
 
 	case apiv1.StateProcessing, apiv1.StateError: // process until the state changes
 		return ctrl.Result{Requeue: true}, r.HandleProcessingState(ctx, plant)
@@ -116,14 +117,44 @@ func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (
 }
 
 func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv1.Plant) error {
-	// create one by one item
+	logger := log.FromContext(ctx)
 
+	// create step-by-step
+	_, err := r.manageDeployment(ctx, plant)
+	if err != nil {
+		return err
+	}
+	_, err = r.manageService(ctx, plant)
+	if err != nil {
+		return err
+	}
+	tlsName, err := r.manageCertificate(ctx, plant)
+	if err != nil {
+		return err
+	}
+	_, err = r.manageIngress(ctx, plant, tlsName)
+	if err != nil {
+		return err
+	}
+
+	// validate states
+	newState := plant.DetermineState()
+	if newState == apiv1.StateReady {
+		if plant.Status.State != apiv1.StateReady {
+			logger.Info("all tasks done, setting Ready state")
+		}
+		return r.UpdateStatusState(ctx, plant, newState)
+	}
+	if err := r.UpdateStatusState(ctx, plant, newState); err != nil {
+		return fmt.Errorf("error while updating status for condition change: %w", err)
+	}
 	return nil
 }
 
 func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
 	// remove resources
 	// if removing { return true, err }
+	// TODO: the ownership on resources should automatically take care of this, but verify
 
 	// remove finalizers to notify that it is safe to delete
 	controllerutil.RemoveFinalizer(plant, apiv1.PlantFinalizer)

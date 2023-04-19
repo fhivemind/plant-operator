@@ -42,12 +42,33 @@ spec:
               image:
                 description: Image specifies the image use for Deployment containers
                 type: string
+              ingressClassName:
+                description: 'TODO: Improve interface'
+                type: string
+              issuerRef:
+                description: ObjectReference is a reference to an object with a given
+                  name, kind and group.
+                properties:
+                  group:
+                    description: Group of the resource being referred to.
+                    type: string
+                  kind:
+                    description: Kind of the resource being referred to.
+                    type: string
+                  name:
+                    description: Name of the resource being referred to.
+                    type: string
+                required:
+                - name
+                type: object
               replicas:
                 description: Replicas defines the number of desired pods to deploy.
                   Defaults to 1.
                 format: int32
                 minimum: 1
                 type: integer
+              tlsSecretRef:
+                type: string
             type: object
           status:
             description: PlantStatus defines the observed state of Plant

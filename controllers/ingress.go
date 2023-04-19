@@ -14,7 +14,8 @@ import (
 
 const ingressCondition v1.ConditionType = "deployment-ingress"
 
-func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant) (*networkingv1.Ingress, error) {
+// TODO: this will not work for ACME challenge, fix it!
+func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant, tlsSecretName string) (*networkingv1.Ingress, error) {
 	logger := log.FromContext(ctx)
 
 	// Create ingress if not found
@@ -36,7 +37,7 @@ func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant) (*
 	}
 
 	// Update ingress if required
-	requiredIngress := defineIngress(plant)
+	requiredIngress := defineIngress(plant, tlsSecretName)
 	if !reflect.DeepEqual(requiredIngress.Spec, ingress.Spec) {
 		ingress.ObjectMeta = requiredIngress.ObjectMeta
 		err = r.Client.Update(ctx, ingress)
@@ -53,26 +54,37 @@ func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant) (*
 	return ingress, nil
 }
 
-func defineIngress(obj *v1.Plant) *networkingv1.Ingress {
+func defineIngress(plant *v1.Plant, tlsSecretName string) *networkingv1.Ingress {
+	var tlsIngress []networkingv1.IngressTLS
+	if tlsSecretName != "" {
+		tlsIngress = []networkingv1.IngressTLS{
+			{
+				Hosts: []string{
+					plant.Spec.Host,
+				},
+				SecretName: tlsSecretName,
+			},
+		}
+	}
 	pathType := networkingv1.PathTypePrefix
-	ingressClassName := "nginx"
 	return &networkingv1.Ingress{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Ingress",
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      obj.Name,
-			Namespace: obj.Namespace,
+			Name:      plant.Name,
+			Namespace: plant.Namespace,
 			Labels: map[string]string{ // TODO: fill better
-				"app": obj.Name,
+				"app": plant.Name,
 			},
 		},
 		Spec: networkingv1.IngressSpec{
-			IngressClassName: &ingressClassName, // TODO: expose API
+			IngressClassName: plant.Spec.IngressClassName,
+			TLS:              tlsIngress,
 			Rules: []networkingv1.IngressRule{
 				{
-					Host: obj.Spec.Host,
+					Host: plant.Spec.Host,
 					IngressRuleValue: networkingv1.IngressRuleValue{
 						HTTP: &networkingv1.HTTPIngressRuleValue{
 							Paths: []networkingv1.HTTPIngressPath{
@@ -81,7 +93,7 @@ func defineIngress(obj *v1.Plant) *networkingv1.Ingress {
 									PathType: &pathType,
 									Backend: networkingv1.IngressBackend{
 										Service: &networkingv1.IngressServiceBackend{ // TODO: handle better
-											Name: obj.Name,
+											Name: plant.Name,
 											Port: networkingv1.ServiceBackendPort{
 												Name: "http-service-port",
 											},
