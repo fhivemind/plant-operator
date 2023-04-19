@@ -1,4 +1,5 @@
 
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -24,3 +25,6 @@ Dockerfile.cross
 *.swp
 *.swo
 *~
+
+# generated files
+hack/generated
