@@ -135,16 +135,9 @@ spec:
                   states.
                 items:
                   description: ObjectStatus defines the observed state of Plant-managed
-                    or other objects.
+                    or other objects. If more context is required, embed into the
+                    object.
                   properties:
-                    group:
-                      type: string
-                    kind:
-                      type: string
-                    name:
-                      type: string
-                    namespace:
-                      type: string
                     state:
                       description: State defines all possible resource states
                       enum:
@@ -154,11 +147,17 @@ spec:
                       - Error
                       - ""
                       type: string
-                  required:
-                  - name
-                  - namespace
+                    uuid:
+                      description: UID is a type that holds unique ID values, including
+                        UUIDs.  Because we don't ONLY use UUIDs, this is an alias
+                        to string.  Being a type captures intent and helps make sure
+                        that UIDs and names do not get conflated.
+                      type: string
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               state:
                 description: State signifies current state of Plant.
                 enum:

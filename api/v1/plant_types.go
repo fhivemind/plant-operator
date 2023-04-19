@@ -17,8 +17,10 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Plant is the Schema for the plants API.
@@ -29,6 +31,22 @@ type Plant struct {
 
 	Spec   PlantSpec   `json:"spec,omitempty"`
 	Status PlantStatus `json:"status,omitempty"`
+}
+
+// DetermineState returns calculated state from objects and conditions.
+func (plant *Plant) DetermineState() State {
+	status := &plant.Status
+	for _, moduleStatus := range status.Objects {
+		if moduleStatus.State == StateError {
+			return StateError
+		}
+	}
+	for _, condition := range status.Conditions {
+		if condition.Status != metav1.ConditionTrue {
+			return StateProcessing
+		}
+	}
+	return StateReady
 }
 
 // ConditionsReady returns true if all Conditions are satisfied for Plant.
@@ -45,7 +63,14 @@ func (plant *Plant) ConditionsReady() bool {
 }
 
 // UpdateCondition updates specific condition based on type.
-func (plant *Plant) UpdateCondition(conditionType ConditionType, status metav1.ConditionStatus, reason, msg string) {
+func (plant *Plant) UpdateCondition(conditionType ConditionType, status metav1.ConditionStatus) {
+	reason := "not ready"
+	msg := fmt.Sprintf("%s is not in ready state", conditionType)
+	if status == metav1.ConditionTrue {
+		reason = "ready"
+		msg = fmt.Sprintf("%s is in ready state", conditionType)
+	}
+
 	meta.SetStatusCondition(&plant.Status.Conditions, metav1.Condition{
 		Type:               string(conditionType),
 		Status:             status,
@@ -72,6 +97,10 @@ func (plant *Plant) ContainsCondition(conditionType ConditionType, conditionStat
 		}
 	}
 	return false
+}
+
+func (plant *Plant) SyncObject(status ObjectStatus) {
+
 }
 
 // PlantSpec defines the desired state of Plant
@@ -104,6 +133,9 @@ type PlantStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Objects contains various identifiers about managed objects' states.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
 	Objects []ObjectStatus `json:"objects,omitempty"`
 
 	// LastUpdateTime specifies the last time this resource has been updated.
@@ -111,12 +143,10 @@ type PlantStatus struct {
 }
 
 // ObjectStatus defines the observed state of Plant-managed or other objects.
+// If more context is required, embed into the object.
 type ObjectStatus struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Kind      string `json:"kind,omitempty"`
-	Group     string `json:"group,omitempty"`
-	State     State  `json:"state,omitempty"`
+	UUID  types.UID `json:"uuid,omitempty"`
+	State State     `json:"state,omitempty"`
 }
 
 // ConditionType sets the type to a concrete type for safety.
