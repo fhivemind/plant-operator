@@ -62,9 +62,6 @@ type PlantStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Objects contains various identifiers about managed objects' states.
-	// +optional
-	// +listType=map
-	// +listMapKey=name
 	Objects []ObjectStatus `json:"objects,omitempty"`
 
 	// LastUpdateTime specifies the last time this resource has been updated.
