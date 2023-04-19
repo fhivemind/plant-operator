@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v3
 projectName: plant-operator
 repo: github.com/fhivemind/plant-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: cisco.io
+  group: operator
+  kind: Plant
+  path: github.com/fhivemind/plant-operator/api/v1
+  version: v1
 version: "3"

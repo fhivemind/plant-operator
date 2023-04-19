@@ -1,0 +1,27 @@
+# permissions for end users to view plants.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: plant-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: plant-operator
+    app.kubernetes.io/part-of: plant-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: plant-viewer-role
+rules:
+- apiGroups:
+  - operator.cisco.io
+  resources:
+  - plants
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - operator.cisco.io
+  resources:
+  - plants/status
+  verbs:
+  - get

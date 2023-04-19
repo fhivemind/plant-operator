@@ -1,0 +1,12 @@
+apiVersion: operator.cisco.io/v1
+kind: Plant
+metadata:
+  labels:
+    app.kubernetes.io/name: plant
+    app.kubernetes.io/instance: plant-sample
+    app.kubernetes.io/part-of: plant-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: plant-operator
+  name: plant-sample
+spec:
+  # TODO(user): Add fields here
