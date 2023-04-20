@@ -3,13 +3,11 @@ package controllers
 import (
 	"context"
 	v1 "github.com/fhivemind/plant-operator/api/v1"
+	"github.com/fhivemind/plant-operator/pkg/client"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"reflect"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -18,29 +16,18 @@ const deploymentCondition v1.ConditionType = "deployment"
 func (r *PlantReconciler) manageDeployment(ctx context.Context, plant *v1.Plant) (*appsv1.Deployment, error) {
 	logger := log.FromContext(ctx)
 
-	// Create deployment if not found
-	deployment := &appsv1.Deployment{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: plant.Name, Namespace: plant.Namespace}, deployment)
+	// Handle create/fetch
+	required := defineDeployment(plant)
+	fetched := required.DeepCopy()
+	err := client.For[*appsv1.Deployment](r.Client).CreateOrFetch(ctx, fetched)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, deployment); err != nil { // create if not found
-				return nil, err
-			}
-			if err := controllerutil.SetControllerReference(plant, deployment, r.Scheme); err != nil { // set ownership
-				return nil, err
-			}
-			logger.Info("successfully created deployment")
-		} else {
-			logger.Info("failed to create deployment")
-			return nil, err
-		}
+		return nil, err
 	}
 
-	// Update deployment if required
-	requiredDeployment := defineDeployment(plant)
-	if !reflect.DeepEqual(requiredDeployment.Spec, deployment.Spec) {
-		deployment.ObjectMeta = requiredDeployment.ObjectMeta
-		err = r.Client.Update(ctx, deployment)
+	// Handle update
+	if !reflect.DeepEqual(fetched.Spec, required.Spec) {
+		fetched.ObjectMeta = required.ObjectMeta
+		err = r.Client.Update(ctx, fetched)
 		if err != nil {
 			return nil, err
 		}
@@ -53,14 +40,14 @@ func (r *PlantReconciler) manageDeployment(ctx context.Context, plant *v1.Plant)
 	//if deployment.Status.ReadyReplicas == *plant.Spec.Replicas {
 	//	deploymentState, deploymentStatus = v1.StateReady, metav1.ConditionTrue
 	//}
-	//err = r.SyncStatusObject(ctx, plant, &v1.ObjectStatus{
+	//err = r.SyncStatusObject(ctx, plant, &v1.ResourceStatus{
 	//	UUID:  deployment.UID,
 	//	State: deploymentState,
 	//})
 	plant.UpdateCondition(deploymentCondition, metav1.ConditionTrue)
 
 	// Return back
-	return deployment, nil
+	return fetched, nil
 }
 
 func defineDeployment(plant *v1.Plant) *appsv1.Deployment {

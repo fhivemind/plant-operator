@@ -50,7 +50,6 @@ type PlantSpec struct {
 }
 
 // PlantStatus defines the observed state of Plant
-// +kubebuilder:subresource:status
 type PlantStatus struct {
 	// State signifies current state of Plant.
 	State State `json:"state,omitempty"`
@@ -61,16 +60,17 @@ type PlantStatus struct {
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Objects contains various identifiers about managed objects' states.
-	Objects []ObjectStatus `json:"objects,omitempty"`
+	// Resources contains various identifiers about managed objects' states.
+	Resources []ResourceStatus `json:"objects,omitempty"`
 
 	// LastUpdateTime specifies the last time this resource has been updated.
-	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
+	// +optional
+	LastUpdateTime *metav1.Time `json:"lastUpdateTime,omitempty"`
 }
 
-// ObjectStatus defines the observed state of Plant-managed or other objects.
+// ResourceStatus defines the observed state of Plant-managed or other objects.
 // If more context is required, embed into the object.
-type ObjectStatus struct {
+type ResourceStatus struct {
 	UUID  types.UID `json:"uuid,omitempty"`
 	State State     `json:"state,omitempty"`
 }
@@ -93,16 +93,22 @@ const (
 	StateDeleting State = "Deleting"
 )
 
-// PlantList contains a list of Plant
 // +kubebuilder:object:root=true
+
+// PlantList contains a list of Plant
 type PlantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Plant `json:"items"`
 }
 
+//+genclient
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.state"
+//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+
 // Plant is the Schema for the plants API.
-// +kubebuilder:object:root=true
 type Plant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -114,7 +120,7 @@ type Plant struct {
 // DetermineState returns calculated state from objects and conditions.
 func (plant *Plant) DetermineState() State {
 	status := &plant.Status
-	for _, moduleStatus := range status.Objects {
+	for _, moduleStatus := range status.Resources {
 		if moduleStatus.State == StateError {
 			return StateError
 		}

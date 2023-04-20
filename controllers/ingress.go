@@ -3,69 +3,56 @@ package controllers
 import (
 	"context"
 	v1 "github.com/fhivemind/plant-operator/api/v1"
+	"github.com/fhivemind/plant-operator/pkg/client"
 	networkingv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"reflect"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const ingressCondition v1.ConditionType = "deployment-ingress"
 
 // TODO: this will not work for ACME challenge, fix it!
-func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant, tlsSecretName string) (*networkingv1.Ingress, error) {
+func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant) (*networkingv1.Ingress, error) {
 	logger := log.FromContext(ctx)
 
-	// Create ingress if not found
-	ingress := &networkingv1.Ingress{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: plant.Name, Namespace: plant.Namespace}, ingress)
+	// Handle create/fetch
+	required := defineIngress(plant)
+	fetched := required.DeepCopy()
+	err := client.For[*networkingv1.Ingress](r.Client).CreateOrFetch(ctx, fetched)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, ingress); err != nil { // create if not found
-				return nil, err
-			}
-			if err := controllerutil.SetControllerReference(plant, ingress, r.Scheme); err != nil { // set ownership
-				return nil, err
-			}
-			logger.Info("successfully created ingress")
-		} else {
-			logger.Info("failed to create ingress")
-			return nil, err
-		}
+		return nil, err
 	}
 
-	// Update ingress if required
-	requiredIngress := defineIngress(plant, tlsSecretName)
-	if !reflect.DeepEqual(requiredIngress.Spec, ingress.Spec) {
-		ingress.ObjectMeta = requiredIngress.ObjectMeta
-		err = r.Client.Update(ctx, ingress)
+	// Handle update
+	if !reflect.DeepEqual(fetched.Spec, required.Spec) {
+		fetched.ObjectMeta = required.ObjectMeta
+		err = r.Client.Update(ctx, fetched)
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("successfully updated ingress")
+		logger.Info("successfully updated deployment")
 	}
 
 	// TODO: handle resource changes by using watchers to handle Plant status updates
 	plant.UpdateCondition(ingressCondition, metav1.ConditionTrue)
 
 	// Return back
-	return ingress, nil
+	return fetched, nil
 }
 
-func defineIngress(plant *v1.Plant, tlsSecretName string) *networkingv1.Ingress {
-	var tlsIngress []networkingv1.IngressTLS
-	if tlsSecretName != "" {
-		tlsIngress = []networkingv1.IngressTLS{
-			{
-				Hosts: []string{
-					plant.Spec.Host,
-				},
-				SecretName: tlsSecretName,
-			},
-		}
-	}
+func defineIngress(plant *v1.Plant) *networkingv1.Ingress {
+	//var tlsIngress []networkingv1.IngressTLS
+	//if tlsSecretName != "" {
+	//	tlsIngress = []networkingv1.IngressTLS{
+	//		{
+	//			Hosts: []string{
+	//				plant.Spec.Host,
+	//			},
+	//			SecretName: tlsSecretName,
+	//		},
+	//	}
+	//}
 	pathType := networkingv1.PathTypePrefix
 	return &networkingv1.Ingress{
 		TypeMeta: metav1.TypeMeta{
@@ -81,7 +68,7 @@ func defineIngress(plant *v1.Plant, tlsSecretName string) *networkingv1.Ingress 
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: plant.Spec.IngressClassName,
-			TLS:              tlsIngress,
+			// TLS:              tlsIngress,
 			Rules: []networkingv1.IngressRule{
 				{
 					Host: plant.Spec.Host,
@@ -95,7 +82,7 @@ func defineIngress(plant *v1.Plant, tlsSecretName string) *networkingv1.Ingress 
 										Service: &networkingv1.IngressServiceBackend{ // TODO: handle better
 											Name: plant.Name,
 											Port: networkingv1.ServiceBackendPort{
-												Name: "http-service-port",
+												Name: "http-port",
 											},
 										},
 									},

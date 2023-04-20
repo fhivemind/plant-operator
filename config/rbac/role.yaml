@@ -42,9 +42,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - networking
+  - networking.k8s.io
   resources:
-  - ingress
+  - ingresses
   verbs:
   - create
   - delete
@@ -53,6 +53,20 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses/finalizers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses/status
+  verbs:
+  - get
 - apiGroups:
   - operator.cisco.io
   resources:

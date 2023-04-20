@@ -15,7 +15,14 @@ spec:
     singular: plant
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: Plant is the Schema for the plants API.
@@ -152,10 +159,10 @@ spec:
                 format: date-time
                 type: string
               objects:
-                description: Objects contains various identifiers about managed objects'
-                  states.
+                description: Resources contains various identifiers about managed
+                  objects' states.
                 items:
-                  description: ObjectStatus defines the observed state of Plant-managed
+                  description: ResourceStatus defines the observed state of Plant-managed
                     or other objects. If more context is required, embed into the
                     object.
                   properties:
@@ -189,3 +196,5 @@ spec:
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}

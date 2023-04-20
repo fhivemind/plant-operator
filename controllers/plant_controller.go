@@ -49,7 +49,9 @@ type PlantReconciler struct {
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=networking,resources=ingress,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses/status,verbs=get
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses/finalizers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -72,23 +74,24 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Add finalizers to plant if missing
-	if !controllerutil.ContainsFinalizer(plant, apiv1.PlantFinalizer) {
-		controllerutil.AddFinalizer(plant, apiv1.PlantFinalizer)
-		if err := r.Update(ctx, plant); err != nil {
-			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after finalizer check: %w", err))
-		}
-	}
+	return ctrl.Result{}, r.HandleProcessingState(ctx, plant)
 
-	// Check if plant scheduled but not configured for deletion
-	if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
-		if err := r.UpdateStatusState(ctx, plant, apiv1.StateDeleting); err != nil {
-			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
-		}
-	}
-
-	// Handle states
-	return r.StateHandle(ctx, plant)
+	//// Add finalizers to plant if missing
+	//if controllerutil.AddFinalizer(plant, apiv1.PlantFinalizer) {
+	//	if err := r.Update(ctx, plant); err != nil {
+	//		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after finalizer check: %w", err))
+	//	}
+	//}
+	//
+	//// Check if plant scheduled but not configured for deletion
+	//if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
+	//	if err := r.UpdateStatusState(ctx, plant, apiv1.StateDeleting); err != nil {
+	//		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
+	//	}
+	//}
+	//
+	//// Handle states
+	//return r.StateHandle(ctx, plant)
 }
 
 // ErrorHandle logs the error, puts plant into "Error" state, and requeue the request
@@ -128,11 +131,11 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 	if err != nil {
 		return err
 	}
-	tlsName, err := r.manageCertificate(ctx, plant)
-	if err != nil {
-		return err
-	}
-	_, err = r.manageIngress(ctx, plant, tlsName)
+	//tlsName, err := r.manageCertificate(ctx, plant)
+	//if err != nil {
+	//	return err
+	//}
+	_, err = r.manageIngress(ctx, plant)
 	if err != nil {
 		return err
 	}
@@ -170,24 +173,27 @@ func (r *PlantReconciler) UpdateStatusState(ctx context.Context, plant *apiv1.Pl
 }
 
 func (r *PlantReconciler) UpdateStatus(ctx context.Context, plant *apiv1.Plant) error {
-	plant.Status.LastUpdateTime = metav1.NewTime(time.Now())
-	if err := r.Patch(ctx, plant, client.Apply); err != nil {
+	if plant.Status.LastUpdateTime == nil {
+		plant.Status.LastUpdateTime = new(metav1.Time)
+	}
+	*plant.Status.LastUpdateTime = metav1.NewTime(time.Now())
+	if err := r.Client.Status().Update(ctx, plant); err != nil {
 		return fmt.Errorf("could not update Plant status: %w", err)
 	}
 	return nil
 }
 
-func (r *PlantReconciler) SyncStatusObject(ctx context.Context, plant *apiv1.Plant, object *apiv1.ObjectStatus) error {
+func (r *PlantReconciler) SyncStatusObject(ctx context.Context, plant *apiv1.Plant, object *apiv1.ResourceStatus) error {
 	found := false
-	for id, obj := range plant.Status.Objects {
+	for id, obj := range plant.Status.Resources {
 		if obj.UUID == object.UUID {
 			found = true
-			plant.Status.Objects[id] = *object.DeepCopy()
+			plant.Status.Resources[id] = *object.DeepCopy()
 			break
 		}
 	}
 	if !found {
-		plant.Status.Objects = append(plant.Status.Objects, *object.DeepCopy())
+		plant.Status.Resources = append(plant.Status.Resources, *object.DeepCopy())
 	}
 	return r.UpdateStatus(ctx, plant)
 }
