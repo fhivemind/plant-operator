@@ -42,7 +42,17 @@ var _ webhook.Defaulter = &Plant{}
 func (r *Plant) Default() {
 	plantlog.Info("default", "name", r.Name)
 
-	// TODO(user): fill in your defaulting logic.
+	// set default ContainerPort
+	if r.Spec.ContainerPort == nil {
+		r.Spec.ContainerPort = new(int32)
+		*r.Spec.ContainerPort = DefaultContainerPort
+	}
+
+	// set default Replicas
+	if r.Spec.Replicas == nil {
+		r.Spec.Replicas = new(int32)
+		*r.Spec.Replicas = DefaultReplicaCount
+	}
 }
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.

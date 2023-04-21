@@ -2,46 +2,50 @@ package controllers
 
 import (
 	"context"
-	v1 "github.com/fhivemind/plant-operator/api/v1"
-	"github.com/fhivemind/plant-operator/pkg/client"
+	apiv1 "github.com/fhivemind/plant-operator/api/v1"
+	"github.com/fhivemind/plant-operator/pkg/resource"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"reflect"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const serviceCondition v1.ConditionType = "deployment-service"
+const serviceCondition apiv1.ConditionType = "deployment-service"
 
-func (r *PlantReconciler) manageService(ctx context.Context, plant *v1.Plant) (*corev1.Service, error) {
-	logger := log.FromContext(ctx)
-
-	// Handle create/fetch
+func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant) resource.Handler[*corev1.Service] {
 	required := defineService(plant)
-	fetched := required.DeepCopy()
-	err := client.For[*corev1.Service](r.Client).CreateOrFetch(ctx, fetched)
-	if err != nil {
-		return nil, err
+	return resource.Handler[*corev1.Service]{
+		Name: "service",
+
+		FetchFunc: func(object *corev1.Service) error {
+			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
+		},
+
+		CreateFunc: func(object *corev1.Service) error {
+			if err := r.Client.Create(ctx, object); err != nil {
+				return err
+			}
+			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
+		},
+
+		UpdateFunc: func(object *corev1.Service) (bool, error) {
+			if !reflect.DeepEqual(object.Spec, required.Spec) {
+				object.ObjectMeta = required.ObjectMeta
+				err := r.Client.Update(ctx, object)
+				return true, err
+			}
+			return false, nil
+		},
+
+		IsReady: func(object *corev1.Service) bool {
+			return apiv1.ConditionsReady(object.Status.Conditions)
+		},
 	}
-
-	// Handle update
-	if !reflect.DeepEqual(fetched.Spec, required.Spec) {
-		fetched.ObjectMeta = required.ObjectMeta
-		err = r.Client.Update(ctx, fetched)
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("successfully updated deployment")
-	}
-
-	// TODO: handle resource changes by using watchers to handle Plant status updates
-	plant.UpdateCondition(serviceCondition, metav1.ConditionTrue)
-
-	// Return back
-	return fetched, nil
 }
 
-func defineService(plant *v1.Plant) *corev1.Service {
+func defineService(plant *apiv1.Plant) *corev1.Service {
 	return &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Service",

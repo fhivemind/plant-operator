@@ -2,46 +2,48 @@ package controllers
 
 import (
 	"context"
-	v1 "github.com/fhivemind/plant-operator/api/v1"
-	"github.com/fhivemind/plant-operator/pkg/client"
+	apiv1 "github.com/fhivemind/plant-operator/api/v1"
+	"github.com/fhivemind/plant-operator/pkg/resource"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"reflect"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const ingressCondition v1.ConditionType = "deployment-ingress"
-
-// TODO: this will not work for ACME challenge, fix it!
-func (r *PlantReconciler) manageIngress(ctx context.Context, plant *v1.Plant) (*networkingv1.Ingress, error) {
-	logger := log.FromContext(ctx)
-
-	// Handle create/fetch
+func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant) resource.Handler[*networkingv1.Ingress] {
 	required := defineIngress(plant)
-	fetched := required.DeepCopy()
-	err := client.For[*networkingv1.Ingress](r.Client).CreateOrFetch(ctx, fetched)
-	if err != nil {
-		return nil, err
+	return resource.Handler[*networkingv1.Ingress]{
+		Name: "ingress",
+
+		FetchFunc: func(object *networkingv1.Ingress) error {
+			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
+		},
+
+		CreateFunc: func(object *networkingv1.Ingress) error {
+			if err := r.Client.Create(ctx, object); err != nil {
+				return err
+			}
+			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
+		},
+
+		UpdateFunc: func(object *networkingv1.Ingress) (bool, error) {
+			if !reflect.DeepEqual(object.Spec, required.Spec) {
+				object.ObjectMeta = required.ObjectMeta
+				err := r.Client.Update(ctx, object)
+				return true, err
+			}
+			return false, nil
+		},
+
+		IsReady: func(object *networkingv1.Ingress) bool {
+			// TODO: when we add TLS, we can check it here
+			return true
+		},
 	}
-
-	// Handle update
-	if !reflect.DeepEqual(fetched.Spec, required.Spec) {
-		fetched.ObjectMeta = required.ObjectMeta
-		err = r.Client.Update(ctx, fetched)
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("successfully updated deployment")
-	}
-
-	// TODO: handle resource changes by using watchers to handle Plant status updates
-	plant.UpdateCondition(ingressCondition, metav1.ConditionTrue)
-
-	// Return back
-	return fetched, nil
 }
 
-func defineIngress(plant *v1.Plant) *networkingv1.Ingress {
+func defineIngress(plant *apiv1.Plant) *networkingv1.Ingress {
 	//var tlsIngress []networkingv1.IngressTLS
 	//if tlsSecretName != "" {
 	//	tlsIngress = []networkingv1.IngressTLS{

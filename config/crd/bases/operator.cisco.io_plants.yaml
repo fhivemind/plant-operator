@@ -42,6 +42,11 @@ spec:
           spec:
             description: PlantSpec defines the desired state of Plant
             properties:
+              containerPort:
+                description: ContainerPort to expose for host traffic. Defaults to
+                  80.
+                format: int32
+                type: integer
               host:
                 description: Host defines the domain name of a network host where
                   the deployed image will be accessible. Follows RFC 3986 standard.
@@ -166,6 +171,10 @@ spec:
                     or other objects. If more context is required, embed into the
                     object.
                   properties:
+                    gvk:
+                      type: string
+                    name:
+                      type: string
                     state:
                       description: State defines all possible resource states
                       enum:
@@ -174,12 +183,6 @@ spec:
                       - Ready
                       - Error
                       - ""
-                      type: string
-                    uuid:
-                      description: UID is a type that holds unique ID values, including
-                        UUIDs.  Because we don't ONLY use UUIDs, this is an alias
-                        to string.  Being a type captures intent and helps make sure
-                        that UIDs and names do not get conflated.
                       type: string
                   type: object
                 type: array

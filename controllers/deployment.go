@@ -2,55 +2,48 @@ package controllers
 
 import (
 	"context"
-	v1 "github.com/fhivemind/plant-operator/api/v1"
-	"github.com/fhivemind/plant-operator/pkg/client"
+	apiv1 "github.com/fhivemind/plant-operator/api/v1"
+	"github.com/fhivemind/plant-operator/pkg/resource"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"reflect"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const deploymentCondition v1.ConditionType = "deployment"
-
-func (r *PlantReconciler) manageDeployment(ctx context.Context, plant *v1.Plant) (*appsv1.Deployment, error) {
-	logger := log.FromContext(ctx)
-
-	// Handle create/fetch
+func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Plant) resource.Handler[*appsv1.Deployment] {
 	required := defineDeployment(plant)
-	fetched := required.DeepCopy()
-	err := client.For[*appsv1.Deployment](r.Client).CreateOrFetch(ctx, fetched)
-	if err != nil {
-		return nil, err
+	return resource.Handler[*appsv1.Deployment]{
+		Name: "deployment",
+
+		FetchFunc: func(object *appsv1.Deployment) error {
+			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
+		},
+
+		CreateFunc: func(object *appsv1.Deployment) error {
+			if err := r.Client.Create(ctx, object); err != nil {
+				return err
+			}
+			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
+		},
+
+		UpdateFunc: func(object *appsv1.Deployment) (bool, error) {
+			if !reflect.DeepEqual(object.Spec, required.Spec) {
+				object.ObjectMeta = required.ObjectMeta
+				err := r.Client.Update(ctx, object)
+				return true, err
+			}
+			return false, nil
+		},
+
+		IsReady: func(object *appsv1.Deployment) bool {
+			return object.Status.AvailableReplicas != *plant.Spec.Replicas
+		},
 	}
-
-	// Handle update
-	if !reflect.DeepEqual(fetched.Spec, required.Spec) {
-		fetched.ObjectMeta = required.ObjectMeta
-		err = r.Client.Update(ctx, fetched)
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("successfully updated deployment")
-	}
-
-	// TODO: handle resource changes by using watchers to handle Plant status updates
-	//// Verify deployment
-	//deploymentState, deploymentStatus := v1.StateProcessing, metav1.ConditionFalse
-	//if deployment.Status.ReadyReplicas == *plant.Spec.Replicas {
-	//	deploymentState, deploymentStatus = v1.StateReady, metav1.ConditionTrue
-	//}
-	//err = r.SyncStatusObject(ctx, plant, &v1.ResourceStatus{
-	//	UUID:  deployment.UID,
-	//	State: deploymentState,
-	//})
-	plant.UpdateCondition(deploymentCondition, metav1.ConditionTrue)
-
-	// Return back
-	return fetched, nil
 }
 
-func defineDeployment(plant *v1.Plant) *appsv1.Deployment {
+func defineDeployment(plant *apiv1.Plant) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Deployment",

@@ -17,11 +17,9 @@ limitations under the License.
 package v1
 
 import (
-	"fmt"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // PlantSpec defines the desired state of Plant
@@ -29,6 +27,10 @@ type PlantSpec struct {
 	// Image specifies the image use for Deployment containers
 	//+kubebuilder:validation:Required
 	Image string `json:"image,omitempty"`
+
+	// ContainerPort to expose for host traffic. Defaults to 80.
+	// +optional
+	ContainerPort *int32 `json:"containerPort,omitempty"`
 
 	// Replicas defines the number of desired pods to deploy. Defaults to 1.
 	//+kubebuilder:validation:Minimum=1
@@ -43,8 +45,10 @@ type PlantSpec struct {
 	// TODO: Improve interface
 	// +optional
 	IngressClassName *string `json:"ingressClassName,omitempty"`
+
 	// +optional
 	TlsSecretRef *string `json:"tlsSecretRef,omitempty"`
+
 	// +optional
 	CertIssuerRef *cmmeta.ObjectReference `json:"issuerRef,omitempty"`
 }
@@ -71,8 +75,9 @@ type PlantStatus struct {
 // ResourceStatus defines the observed state of Plant-managed or other objects.
 // If more context is required, embed into the object.
 type ResourceStatus struct {
-	UUID  types.UID `json:"uuid,omitempty"`
-	State State     `json:"state,omitempty"`
+	Name  string `json:"name,omitempty"`
+	GVK   string `json:"gvk,omitempty"`
+	State State  `json:"state,omitempty"`
 }
 
 // ConditionType sets the type to a concrete type for safety.
@@ -117,11 +122,11 @@ type Plant struct {
 	Status PlantStatus `json:"status,omitempty"`
 }
 
-// DetermineState returns calculated state from objects and conditions.
+// DetermineState returns calculated state from resource and conditions.
 func (plant *Plant) DetermineState() State {
 	status := &plant.Status
-	for _, moduleStatus := range status.Resources {
-		if moduleStatus.State == StateError {
+	for _, resource := range status.Resources {
+		if resource.State == StateError {
 			return StateError
 		}
 	}
@@ -135,26 +140,11 @@ func (plant *Plant) DetermineState() State {
 
 // ConditionsReady returns true if all Conditions are satisfied for Plant.
 func (plant *Plant) ConditionsReady() bool {
-	if len(plant.Status.Conditions) == 0 {
-		return false
-	}
-	for _, condition := range plant.Status.Conditions {
-		if condition.Status != metav1.ConditionTrue {
-			return false
-		}
-	}
-	return true
+	return ConditionsReady(plant.Status.Conditions)
 }
 
 // UpdateCondition updates specific condition based on type.
-func (plant *Plant) UpdateCondition(conditionType ConditionType, status metav1.ConditionStatus) {
-	reason := "not ready"
-	msg := fmt.Sprintf("%s is not in ready state", conditionType)
-	if status == metav1.ConditionTrue {
-		reason = "ready"
-		msg = fmt.Sprintf("%s is in ready state", conditionType)
-	}
-
+func (plant *Plant) UpdateCondition(conditionType ConditionType, status metav1.ConditionStatus, reason, msg string) {
 	meta.SetStatusCondition(&plant.Status.Conditions, metav1.Condition{
 		Type:               string(conditionType),
 		Status:             status,
@@ -181,6 +171,16 @@ func (plant *Plant) ContainsCondition(conditionType ConditionType, conditionStat
 		}
 	}
 	return false
+}
+
+// ConditionsReady returns true if all Conditions are satisfied.
+func ConditionsReady(conditions []metav1.Condition) bool {
+	for _, condition := range conditions {
+		if condition.Status != metav1.ConditionTrue {
+			return false
+		}
+	}
+	return true
 }
 
 func init() {

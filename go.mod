@@ -1,11 +1,12 @@
 module github.com/fhivemind/plant-operator
 
-go 1.19
+go 1.20
 
 require (
 	github.com/cert-manager/cert-manager v1.11.0
 	github.com/onsi/ginkgo/v2 v2.6.1
 	github.com/onsi/gomega v1.24.2
+	golang.org/x/sync v0.1.0
 	k8s.io/api v0.26.0
 	k8s.io/apimachinery v0.26.0
 	k8s.io/client-go v0.26.0

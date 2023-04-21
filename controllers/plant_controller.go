@@ -18,7 +18,13 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/fhivemind/plant-operator/pkg/resource"
+	"golang.org/x/sync/errgroup"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"time"
@@ -35,6 +41,9 @@ import (
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Plant{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&networkingv1.Ingress{}).
 		Complete(r)
 }
 
@@ -85,7 +94,7 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	//
 	//// Check if plant scheduled but not configured for deletion
 	//if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
-	//	if err := r.UpdateStatusState(ctx, plant, apiv1.StateDeleting); err != nil {
+	//	if err := r.UpdateState(ctx, plant, apiv1.StateDeleting); err != nil {
 	//		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
 	//	}
 	//}
@@ -97,14 +106,14 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // ErrorHandle logs the error, puts plant into "Error" state, and requeue the request
 func (r *PlantReconciler) ErrorHandle(ctx context.Context, plant *apiv1.Plant, err error) (ctrl.Result, error) {
 	log.FromContext(ctx).Error(err, "error occurred, requeue...")
-	return ctrl.Result{Requeue: true}, r.UpdateStatusState(ctx, plant, apiv1.StateError)
+	return ctrl.Result{Requeue: true}, r.UpdateState(ctx, plant, apiv1.StateError)
 }
 
 // StateHandle invokes and reschedules workflows based on plant state.
 func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (ctrl.Result, error) {
 	switch plant.Status.State {
 	case "": // change state to "Processing"
-		return ctrl.Result{Requeue: true}, r.UpdateStatusState(ctx, plant, apiv1.StateProcessing)
+		return ctrl.Result{Requeue: true}, r.UpdateState(ctx, plant, apiv1.StateProcessing)
 
 	case apiv1.StateProcessing, apiv1.StateError: // process until the state changes
 		return ctrl.Result{Requeue: true}, r.HandleProcessingState(ctx, plant)
@@ -122,42 +131,34 @@ func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (
 func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv1.Plant) error {
 	logger := log.FromContext(ctx)
 
-	// create step-by-step
-	_, err := r.manageDeployment(ctx, plant)
-	if err != nil {
-		return err
-	}
-	_, err = r.manageService(ctx, plant)
-	if err != nil {
-		return err
-	}
-	//tlsName, err := r.manageCertificate(ctx, plant)
-	//if err != nil {
-	//	return err
-	//}
-	_, err = r.manageIngress(ctx, plant)
-	if err != nil {
-		return err
-	}
+	// do processing
+	deployment := &appsv1.Deployment{}
+	service := &corev1.Service{}
+	ingress := &networkingv1.Ingress{}
 
-	// validate states
+	var errGroup errgroup.Group
+	errGroup.Go(func() error { return doHandleWith(plant, deployment, r.deploymentHandler(ctx, plant)) })
+	errGroup.Go(func() error { return doHandleWith(plant, service, r.serviceManager(ctx, plant)) })
+	errGroup.Go(func() error { return doHandleWith(plant, ingress, r.ingressManager(ctx, plant)) })
+
+	processingErr := errGroup.Wait()
+
+	// update states
 	newState := plant.DetermineState()
-	if newState == apiv1.StateReady {
-		if plant.Status.State != apiv1.StateReady {
-			logger.Info("all tasks done, setting Ready state")
-		}
-		return r.UpdateStatusState(ctx, plant, newState)
+	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
+		logger.Info("all tasks done, setting Ready state")
 	}
-	if err := r.UpdateStatusState(ctx, plant, newState); err != nil {
-		return fmt.Errorf("error while updating status for condition change: %w", err)
+	updateErr := r.UpdateState(ctx, plant, newState)
+	if updateErr != nil {
+		updateErr = fmt.Errorf("error while updating status for condition change: %w", updateErr)
 	}
-	return nil
+	return errors.Join(processingErr, updateErr)
 }
 
 func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
-	// remove resources
+	// remove resource
 	// if removing { return true, err }
-	// TODO: the ownership on resources should automatically take care of this, but verify
+	// TODO: the ownership on resource should automatically take care of this, but verify
 
 	// remove finalizers to notify that it is safe to delete
 	controllerutil.RemoveFinalizer(plant, apiv1.PlantFinalizer)
@@ -167,7 +168,7 @@ func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.
 	return false, nil
 }
 
-func (r *PlantReconciler) UpdateStatusState(ctx context.Context, plant *apiv1.Plant, newState apiv1.State) error {
+func (r *PlantReconciler) UpdateState(ctx context.Context, plant *apiv1.Plant, newState apiv1.State) error {
 	plant.Status.State = newState
 	return r.UpdateStatus(ctx, plant)
 }
@@ -183,17 +184,49 @@ func (r *PlantReconciler) UpdateStatus(ctx context.Context, plant *apiv1.Plant) 
 	return nil
 }
 
-func (r *PlantReconciler) SyncStatusObject(ctx context.Context, plant *apiv1.Plant, object *apiv1.ResourceStatus) error {
-	found := false
-	for id, obj := range plant.Status.Resources {
-		if obj.UUID == object.UUID {
-			found = true
-			plant.Status.Resources[id] = *object.DeepCopy()
-			break
+func doHandleWith[T client.Object](plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
+	// Define initial states
+	state := apiv1.StateProcessing
+	conditionState := metav1.ConditionFalse
+
+	// Run handler and extract results
+	flow, err := handler.Handle(obj)
+	if err != nil { // generic fail
+		state = apiv1.StateError
+	} else if flow.Done() { // finished with success
+		state = apiv1.StateReady
+		conditionState = metav1.ConditionTrue
+	}
+	opName := string(flow)
+	if flow.Done() || flow.Checking() {
+		opName = "Healthcheck"
+	}
+
+	// Set resource conditions
+	plant.UpdateCondition(apiv1.ConditionType(handler.Name), conditionState, opName,
+		fmt.Sprintf("%s is in %s state", opName, state))
+
+	// Add resource data only if no error returned
+	if err == nil {
+		result := apiv1.ResourceStatus{
+			Name:  obj.GetName(),
+			GVK:   obj.GetObjectKind().GroupVersionKind().String(),
+			State: state,
+		}
+
+		found := false
+		for id, item := range plant.Status.Resources {
+			if item.Name == result.Name {
+				found = true
+				plant.Status.Resources[id] = result
+				break
+			}
+		}
+		if !found {
+			plant.Status.Resources = append(plant.Status.Resources, result)
 		}
 	}
-	if !found {
-		plant.Status.Resources = append(plant.Status.Resources, *object.DeepCopy())
-	}
-	return r.UpdateStatus(ctx, plant)
+
+	// Pass result once everything has been handled
+	return err
 }
