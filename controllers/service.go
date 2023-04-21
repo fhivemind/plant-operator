@@ -18,27 +18,26 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 	required := defineService(plant)
 	return resource.Handler[*corev1.Service]{
 		Name: "service",
-
+		Ctx:  ctx,
 		FetchFunc: func(object *corev1.Service) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
 		},
-
 		CreateFunc: func(object *corev1.Service) error {
+			object = required.DeepCopy() // update
 			if err := r.Client.Create(ctx, object); err != nil {
 				return err
 			}
 			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
 		},
-
 		UpdateFunc: func(object *corev1.Service) (bool, error) {
 			if !reflect.DeepEqual(object.Spec, required.Spec) {
-				object.ObjectMeta = required.ObjectMeta
+				object.Spec = required.Spec
+				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
 				err := r.Client.Update(ctx, object)
 				return true, err
 			}
 			return false, nil
 		},
-
 		IsReady: func(object *corev1.Service) bool {
 			return apiv1.ConditionsReady(object.Status.Conditions)
 		},

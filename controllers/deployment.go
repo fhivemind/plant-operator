@@ -16,27 +16,26 @@ func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Pl
 	required := defineDeployment(plant)
 	return resource.Handler[*appsv1.Deployment]{
 		Name: "deployment",
-
+		Ctx:  ctx,
 		FetchFunc: func(object *appsv1.Deployment) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
 		},
-
 		CreateFunc: func(object *appsv1.Deployment) error {
+			object = required.DeepCopy() // update
 			if err := r.Client.Create(ctx, object); err != nil {
 				return err
 			}
 			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
 		},
-
 		UpdateFunc: func(object *appsv1.Deployment) (bool, error) {
 			if !reflect.DeepEqual(object.Spec, required.Spec) {
-				object.ObjectMeta = required.ObjectMeta
+				object.Spec = required.Spec
+				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
 				err := r.Client.Update(ctx, object)
 				return true, err
 			}
 			return false, nil
 		},
-
 		IsReady: func(object *appsv1.Deployment) bool {
 			return object.Status.AvailableReplicas != *plant.Spec.Replicas
 		},

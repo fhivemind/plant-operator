@@ -26,7 +26,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,9 +43,9 @@ import (
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Plant{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{}).
-		Owns(&networkingv1.Ingress{}).
+		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&corev1.Service{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&networkingv1.Ingress{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -73,7 +75,8 @@ type PlantReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("plant", req.NamespacedName)
+	ctx = context.WithValue(ctx, "request", req.NamespacedName)
+	logger := log.FromContext(ctx)
 	logger.Info("Reconciling")
 
 	// Fetch plant resource if it exists
@@ -199,7 +202,7 @@ func doHandleWith[T client.Object](plant *apiv1.Plant, obj T, handler resource.H
 	}
 	opName := string(flow)
 	if flow.Done() || flow.Checking() {
-		opName = "Healthcheck"
+		opName = "Object" // as in, we are monitoring this
 	}
 
 	// Set resource conditions
@@ -209,7 +212,7 @@ func doHandleWith[T client.Object](plant *apiv1.Plant, obj T, handler resource.H
 	// Add resource data only if no error returned
 	if err == nil {
 		result := apiv1.ResourceStatus{
-			Name:  obj.GetName(),
+			Name:  fmt.Sprintf("%s/%s", handler.Name, obj.GetName()),
 			GVK:   obj.GetObjectKind().GroupVersionKind().String(),
 			State: state,
 		}

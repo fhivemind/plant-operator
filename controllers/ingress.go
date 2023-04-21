@@ -15,27 +15,26 @@ func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant
 	required := defineIngress(plant)
 	return resource.Handler[*networkingv1.Ingress]{
 		Name: "ingress",
-
+		Ctx:  ctx,
 		FetchFunc: func(object *networkingv1.Ingress) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
 		},
-
 		CreateFunc: func(object *networkingv1.Ingress) error {
+			object = required.DeepCopy() // update
 			if err := r.Client.Create(ctx, object); err != nil {
 				return err
 			}
 			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
 		},
-
 		UpdateFunc: func(object *networkingv1.Ingress) (bool, error) {
 			if !reflect.DeepEqual(object.Spec, required.Spec) {
-				object.ObjectMeta = required.ObjectMeta
+				object.Spec = required.Spec
+				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
 				err := r.Client.Update(ctx, object)
 				return true, err
 			}
 			return false, nil
 		},
-
 		IsReady: func(object *networkingv1.Ingress) bool {
 			// TODO: when we add TLS, we can check it here
 			return true
