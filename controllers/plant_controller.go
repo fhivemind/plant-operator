@@ -43,7 +43,7 @@ import (
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Plant{}).
-		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})). // TODO: keep synced with available replica status
 		Owns(&corev1.Service{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&networkingv1.Ingress{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
@@ -86,24 +86,22 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	return ctrl.Result{}, r.HandleProcessingState(ctx, plant)
+	// Add finalizers to plant if missing
+	if controllerutil.AddFinalizer(plant, apiv1.PlantFinalizer) {
+		if err := r.Update(ctx, plant); err != nil {
+			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after finalizer check: %w", err))
+		}
+	}
 
-	//// Add finalizers to plant if missing
-	//if controllerutil.AddFinalizer(plant, apiv1.PlantFinalizer) {
-	//	if err := r.Update(ctx, plant); err != nil {
-	//		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after finalizer check: %w", err))
-	//	}
-	//}
-	//
-	//// Check if plant scheduled but not configured for deletion
-	//if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
-	//	if err := r.UpdateState(ctx, plant, apiv1.StateDeleting); err != nil {
-	//		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
-	//	}
-	//}
-	//
-	//// Handle states
-	//return r.StateHandle(ctx, plant)
+	// Check if plant scheduled but not configured for deletion
+	if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
+		if err := r.UpdateState(ctx, plant, apiv1.StateDeleting); err != nil {
+			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
+		}
+	}
+
+	// Handle states
+	return r.StateHandle(ctx, plant)
 }
 
 // ErrorHandle logs the error, puts plant into "Error" state, and requeue the request
@@ -140,33 +138,34 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 	ingress := &networkingv1.Ingress{}
 
 	var errGroup errgroup.Group
-	errGroup.Go(func() error { return doHandleWith(plant, deployment, r.deploymentHandler(ctx, plant)) })
-	errGroup.Go(func() error { return doHandleWith(plant, service, r.serviceManager(ctx, plant)) })
-	errGroup.Go(func() error { return doHandleWith(plant, ingress, r.ingressManager(ctx, plant)) })
+	errGroup.Go(func() error { return doHandleWith(ctx, plant, deployment, r.deploymentHandler(ctx, plant)) })
+	errGroup.Go(func() error { return doHandleWith(ctx, plant, service, r.serviceManager(ctx, plant)) })
+	errGroup.Go(func() error { return doHandleWith(ctx, plant, ingress, r.ingressManager(ctx, plant)) })
 
 	processingErr := errGroup.Wait()
 
 	// update states
 	newState := plant.DetermineState()
 	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		logger.Info("all tasks done, setting Ready state")
+		logger.Info("All tasks done, setting Ready state")
 	}
 	updateErr := r.UpdateState(ctx, plant, newState)
 	if updateErr != nil {
-		updateErr = fmt.Errorf("error while updating status for condition change: %w", updateErr)
+		updateErr = fmt.Errorf("error while updating Plant status during processing: %w", updateErr)
 	}
 	return errors.Join(processingErr, updateErr)
 }
 
 func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
-	// remove resource
-	// if removing { return true, err }
-	// TODO: the ownership on resource should automatically take care of this, but verify
+	// Remove hanging resources
+	// The garbage collector will handle internal resource deletion, but we do the external ones
 
-	// remove finalizers to notify that it is safe to delete
+	// Nothing to do here for now, continue
+
+	// Remove finalizers to notify that it is safe to delete
 	controllerutil.RemoveFinalizer(plant, apiv1.PlantFinalizer)
 	if err := r.Update(ctx, plant); err != nil {
-		return false, fmt.Errorf("error while trying to update plant during deletion: %w", err)
+		return false, fmt.Errorf("error while trying to update Plant during deletion: %w", err)
 	}
 	return false, nil
 }
@@ -187,13 +186,13 @@ func (r *PlantReconciler) UpdateStatus(ctx context.Context, plant *apiv1.Plant) 
 	return nil
 }
 
-func doHandleWith[T client.Object](plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
+func doHandleWith[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
 	// Define initial states
 	state := apiv1.StateProcessing
 	conditionState := metav1.ConditionFalse
 
 	// Run handler and extract results
-	flow, err := handler.Handle(obj)
+	flow, err := handler.Handle(ctx, obj)
 	if err != nil { // generic fail
 		state = apiv1.StateError
 	} else if flow.Done() { // finished with success
@@ -202,7 +201,7 @@ func doHandleWith[T client.Object](plant *apiv1.Plant, obj T, handler resource.H
 	}
 	opName := string(flow)
 	if flow.Done() || flow.Checking() {
-		opName = "Object" // as in, we are monitoring this
+		opName = "Check"
 	}
 
 	// Set resource conditions

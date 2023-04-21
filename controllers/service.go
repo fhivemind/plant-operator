@@ -18,23 +18,21 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 	required := defineService(plant)
 	return resource.Handler[*corev1.Service]{
 		Name: "service",
-		Ctx:  ctx,
 		FetchFunc: func(object *corev1.Service) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
 		},
 		CreateFunc: func(object *corev1.Service) error {
-			object = required.DeepCopy() // update
-			if err := r.Client.Create(ctx, object); err != nil {
+			required.DeepCopyInto(object) // update
+			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
-			return controllerutil.SetControllerReference(plant, object, r.Client.Scheme())
+			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *corev1.Service) (bool, error) {
 			if !reflect.DeepEqual(object.Spec, required.Spec) {
 				object.Spec = required.Spec
 				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
-				err := r.Client.Update(ctx, object)
-				return true, err
+				return true, r.Client.Update(ctx, object)
 			}
 			return false, nil
 		},
@@ -46,30 +44,21 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 
 func defineService(plant *apiv1.Plant) *corev1.Service {
 	return &corev1.Service{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Service",
-			APIVersion: "v1",
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
 			Namespace: plant.Namespace,
-			Labels: map[string]string{ // TODO: fill better
-				"app": plant.Name,
-			},
+			Labels:    plant.GetLabels(),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http-port", // TODO: use static key
 					Protocol:   corev1.ProtocolTCP,
-					Port:       8080,
-					TargetPort: intstr.FromString("http-port"), // TODO: use static key
+					Port:       *plant.Spec.ContainerPort,
+					TargetPort: intstr.FromInt(int(*plant.Spec.ContainerPort)),
 				},
 			},
-			Selector: map[string]string{
-				"app": plant.Name, // TODO: fill better
-			},
-			Type: corev1.ServiceTypeNodePort,
+			Selector: plant.GetLabels(),
+			Type:     corev1.ServiceTypeNodePort,
 		},
 	}
 }
