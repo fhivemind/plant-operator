@@ -6,9 +6,7 @@ import (
 	"github.com/fhivemind/plant-operator/pkg/resource"
 	"github.com/fhivemind/plant-operator/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -33,20 +31,13 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *corev1.Service) (bool, error) {
-			expectedSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&expected.Spec)
-			if err != nil {
-				return false, err
-			}
-			objectSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&object.Spec)
-			if err != nil {
-				return false, err
-			}
-			if !equality.Semantic.DeepDerivative(expectedSpecsMap, objectSpecsMap) {
+			if yes, err := utils.IsSubsetOf(&expected.Spec, &object.Spec); yes {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
+			} else {
+				return false, err
 			}
-			return false, nil
 		},
 		IsReady: func(object *corev1.Service) bool {
 			return apiv1.ConditionsReady(object.Status.Conditions)
