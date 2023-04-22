@@ -4,32 +4,46 @@ import (
 	"context"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
+	"github.com/fhivemind/plant-operator/pkg/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Plant) resource.Handler[*appsv1.Deployment] {
-	required := defineDeployment(plant)
+	// create expected object
+	expected := defineDeployment(plant)
+	r.Scheme.Default(expected)
+
+	// return handler
 	return resource.Handler[*appsv1.Deployment]{
 		Name: "deployment",
 		FetchFunc: func(object *appsv1.Deployment) error {
-			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
+			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
 		CreateFunc: func(object *appsv1.Deployment) error {
-			required.DeepCopyInto(object) // update
+			expected.DeepCopyInto(object) // fill with required values
 			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *appsv1.Deployment) (bool, error) {
-			if !reflect.DeepEqual(object.Spec, required.Spec) {
-				object.Spec = required.Spec
-				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
+			expectedSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&expected.Spec)
+			if err != nil {
+				return false, err
+			}
+			objectSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&object.Spec)
+			if err != nil {
+				return false, err
+			}
+			if !equality.Semantic.DeepDerivative(expectedSpecsMap, objectSpecsMap) {
+				expected.Spec.DeepCopyInto(&object.Spec)
+				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
 			}
 			return false, nil
@@ -45,16 +59,16 @@ func defineDeployment(plant *apiv1.Plant) *appsv1.Deployment {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
 			Namespace: plant.Namespace,
-			Labels:    plant.GetLabels(),
+			Labels:    plant.OperatorLabels(),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: plant.GetLabels(),
+				MatchLabels: plant.OperatorLabels(),
 			},
 			Replicas: plant.Spec.Replicas,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: plant.GetLabels(),
+					Labels: plant.OperatorLabels(),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{

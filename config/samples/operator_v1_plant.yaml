@@ -11,8 +11,9 @@ metadata:
 spec:
   # TODO(user): Add fields here
   image: "dockerbogo/docker-nginx-hello-world:latest"
-  host: "example.localhost"
+  containerPort: 80
   replicas: 2
+  host: "example.localhost1"
   ingressClassName: "nginx"
   #tlsSecretRef: "ingress-tls"
   issuerRef:

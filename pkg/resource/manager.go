@@ -17,8 +17,14 @@ const (
 	Ready    HandleState = "Ready"
 )
 
-func (s HandleState) Done() bool     { return s == Ready }
-func (s HandleState) Checking() bool { return s == NotReady }
+func (s HandleState) Done() bool { return s == Ready }
+func (s HandleState) OperationName() string {
+	switch s {
+	case NotReady, Ready:
+		return "Check"
+	}
+	return string(s)
+}
 
 // Handler simplifies synchronization logic for a requested resource.
 // It exposes a simple Handle method which processes resource lifecycle.
@@ -31,45 +37,39 @@ type Handler[T client.Object] struct {
 }
 
 func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
-	logger := log.FromContext(ctx).WithValues("type", fmt.Sprintf("%T", obj))
-	logger.Info("Handling state")
+	logger := log.FromContext(ctx)
 
 	// Fetch the object
 	shouldCreate := false
 	if err := h.FetchFunc(obj); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			logger.Info("Object not found, marking for CREATE")
+			logger.Info(fmt.Sprintf("Marked object %T for CREATE", obj))
 			shouldCreate = true // not found, mark
 		} else {
-			logger.Error(err, "Failed to FETCH object")
-			return Fetch, fmt.Errorf("failed to fetch object %s: %w", obj.GetName(), err) // critical fetch error occurred
+			return Fetch, fmt.Errorf("failed to fetch object %T: %w", obj, err) // critical fetch error occurred
 		}
 	}
 
 	// Create object if marked for creation
 	if shouldCreate {
 		if err := h.CreateFunc(obj); err != nil {
-			logger.Error(err, "Failed to CREATE object")
-			return Create, fmt.Errorf("failed to create object %s: %w", obj.GetName(), err) // critical create error occurred
+			return Create, fmt.Errorf("failed to create object %T: %w", obj, err) // critical create error occurred
 		} else {
-			logger.Info("Successfully ran CREATE operation for object")
+			logger.Info(fmt.Sprintf("Successfully ran CREATE for object %T", obj))
 		}
 	}
 
 	// Update object
 	updated, err := h.UpdateFunc(obj)
 	if err != nil {
-		logger.Error(err, "Failed to UPDATE object")
-		return Update, fmt.Errorf("failed to update object %s: %w", obj.GetName(), err) // critical update error occurred
+		return Update, fmt.Errorf("failed to update object %T: %w", obj, err) // critical update error occurred
 	} else if updated {
-		logger.Info("Successfully ran UPDATE operation for object")
+		logger.Info(fmt.Sprintf("Successfully ran UPDATE for object %T", obj))
 	}
 
 	// Check if object is ready
 	if h.IsReady(obj) {
-		logger.Info("Object is in READY state")
 		return Ready, nil
 	}
-	logger.Info("Object is in NOT READY state")
 	return NotReady, nil
 }

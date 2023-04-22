@@ -26,9 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,9 +41,9 @@ import (
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Plant{}).
-		Owns(&appsv1.Deployment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})). // TODO: keep synced with available replica status
-		Owns(&corev1.Service{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Owns(&networkingv1.Ingress{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&networkingv1.Ingress{}).
 		Complete(r)
 }
 
@@ -87,8 +85,8 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Add finalizers to plant if missing
-	if controllerutil.AddFinalizer(plant, apiv1.PlantFinalizer) {
-		if err := r.Update(ctx, plant); err != nil {
+	if controllerutil.AddFinalizer(plant, apiv1.Finalizer) {
+		if err := r.Update(ctx, plant); err != nil { // TODO: this will reschedule
 			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after finalizer check: %w", err))
 		}
 	}
@@ -98,6 +96,7 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.UpdateState(ctx, plant, apiv1.StateDeleting); err != nil {
 			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
 		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Handle states
@@ -114,16 +113,20 @@ func (r *PlantReconciler) ErrorHandle(ctx context.Context, plant *apiv1.Plant, e
 func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (ctrl.Result, error) {
 	switch plant.Status.State {
 	case "": // change state to "Processing"
+		log.FromContext(ctx).Info("Initial state with requeue...")
 		return ctrl.Result{Requeue: true}, r.UpdateState(ctx, plant, apiv1.StateProcessing)
 
 	case apiv1.StateProcessing, apiv1.StateError: // process until the state changes
+		log.FromContext(ctx).Info("Processing state with requeue...")
 		return ctrl.Result{Requeue: true}, r.HandleProcessingState(ctx, plant)
 
 	case apiv1.StateDeleting: // try deletion until
 		stillDeleting, err := r.HandleDeletingState(ctx, plant)
+		log.FromContext(ctx).Info(fmt.Sprintf("Deleting state with requeue = %v...", stillDeleting || err != nil))
 		return ctrl.Result{Requeue: stillDeleting}, err
 
 	case apiv1.StateReady: // validate ready state
+		log.FromContext(ctx).Info("Ready state running Processing one more time...")
 		return ctrl.Result{}, r.HandleProcessingState(ctx, plant)
 	}
 	return ctrl.Result{}, nil
@@ -163,7 +166,7 @@ func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.
 	// Nothing to do here for now, continue
 
 	// Remove finalizers to notify that it is safe to delete
-	controllerutil.RemoveFinalizer(plant, apiv1.PlantFinalizer)
+	controllerutil.RemoveFinalizer(plant, apiv1.Finalizer)
 	if err := r.Update(ctx, plant); err != nil {
 		return false, fmt.Errorf("error while trying to update Plant during deletion: %w", err)
 	}
@@ -188,45 +191,39 @@ func (r *PlantReconciler) UpdateStatus(ctx context.Context, plant *apiv1.Plant) 
 
 func doHandleWith[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
 	// Define initial states
-	state := apiv1.StateProcessing
+	resourceState := apiv1.StateProcessing
 	conditionState := metav1.ConditionFalse
 
 	// Run handler and extract results
 	flow, err := handler.Handle(ctx, obj)
 	if err != nil { // generic fail
-		state = apiv1.StateError
+		resourceState = apiv1.StateError
 	} else if flow.Done() { // finished with success
-		state = apiv1.StateReady
+		resourceState = apiv1.StateReady
 		conditionState = metav1.ConditionTrue
 	}
-	opName := string(flow)
-	if flow.Done() || flow.Checking() {
-		opName = "Check"
+
+	// Update plant resource conditions
+	plant.UpdateCondition(apiv1.ConditionType(handler.Name), conditionState, flow.OperationName(),
+		fmt.Sprintf("%s operation is in %s state", flow.OperationName(), resourceState))
+
+	// Update plant resource status
+	result := apiv1.ResourceStatus{
+		Name:  handler.Name,
+		GVK:   obj.GetObjectKind().GroupVersionKind().String(),
+		State: resourceState,
 	}
 
-	// Set resource conditions
-	plant.UpdateCondition(apiv1.ConditionType(handler.Name), conditionState, opName,
-		fmt.Sprintf("%s is in %s state", opName, state))
-
-	// Add resource data only if no error returned
-	if err == nil {
-		result := apiv1.ResourceStatus{
-			Name:  fmt.Sprintf("%s/%s", handler.Name, obj.GetName()),
-			GVK:   obj.GetObjectKind().GroupVersionKind().String(),
-			State: state,
+	found := false
+	for id, item := range plant.Status.Resources {
+		if item.Name == result.Name {
+			found = true
+			plant.Status.Resources[id] = result
+			break
 		}
-
-		found := false
-		for id, item := range plant.Status.Resources {
-			if item.Name == result.Name {
-				found = true
-				plant.Status.Resources[id] = result
-				break
-			}
-		}
-		if !found {
-			plant.Status.Resources = append(plant.Status.Resources, result)
-		}
+	}
+	if !found {
+		plant.Status.Resources = append(plant.Status.Resources, result)
 	}
 
 	// Pass result once everything has been handled

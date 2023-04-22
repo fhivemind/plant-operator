@@ -22,15 +22,6 @@ package v1
 import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
-	"strings"
-)
-
-type Kind string
-
-func (k Kind) Plural() string { return strings.ToLower(string(k)) + "s" }
-
-const (
-	PlantKind Kind = "Plant"
 )
 
 var (
@@ -42,7 +33,4 @@ var (
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
-
-	// GroupVersionResource is group version resource.
-	GroupVersionResource = GroupVersion.WithResource(PlantKind.Plural())
 )

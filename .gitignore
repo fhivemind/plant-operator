@@ -28,3 +28,4 @@ Dockerfile.cross
 
 # generated files
 hack/generated
+*.log

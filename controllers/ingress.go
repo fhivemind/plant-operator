@@ -4,31 +4,45 @@ import (
 	"context"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
+	"github.com/fhivemind/plant-operator/pkg/utils"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant) resource.Handler[*networkingv1.Ingress] {
-	required := defineIngress(plant)
+	// create expected object
+	expected := defineIngress(plant)
+	r.Scheme.Default(expected)
+
+	// return handler
 	return resource.Handler[*networkingv1.Ingress]{
 		Name: "ingress",
 		FetchFunc: func(object *networkingv1.Ingress) error {
-			return r.Client.Get(ctx, types.NamespacedName{Namespace: required.Namespace, Name: required.Name}, object)
+			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
 		CreateFunc: func(object *networkingv1.Ingress) error {
-			required.DeepCopyInto(object) // update
+			expected.DeepCopyInto(object) // fill with required values
 			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *networkingv1.Ingress) (bool, error) {
-			if !reflect.DeepEqual(object.Spec, required.Spec) {
-				object.Spec = required.Spec
-				object.ObjectMeta.SetLabels(required.ObjectMeta.Labels)
+			expectedSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&expected.Spec)
+			if err != nil {
+				return false, err
+			}
+			objectSpecsMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&object.Spec)
+			if err != nil {
+				return false, err
+			}
+			if !equality.Semantic.DeepDerivative(expectedSpecsMap, objectSpecsMap) {
+				expected.Spec.DeepCopyInto(&object.Spec)
+				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
 			}
 			return false, nil
@@ -41,27 +55,15 @@ func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant
 }
 
 func defineIngress(plant *apiv1.Plant) *networkingv1.Ingress {
-	//var tlsIngress []networkingv1.IngressTLS
-	//if tlsSecretName != "" {
-	//	tlsIngress = []networkingv1.IngressTLS{
-	//		{
-	//			Hosts: []string{
-	//				plant.Spec.Host,
-	//			},
-	//			SecretName: tlsSecretName,
-	//		},
-	//	}
-	//}
 	pathType := networkingv1.PathTypePrefix
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
 			Namespace: plant.Namespace,
-			Labels:    plant.GetLabels(),
+			Labels:    plant.OperatorLabels(),
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: plant.Spec.IngressClassName,
-			// TLS:              tlsIngress,
 			Rules: []networkingv1.IngressRule{
 				{
 					Host: plant.Spec.Host,
