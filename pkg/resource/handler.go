@@ -14,7 +14,7 @@ const (
 	Fetch    HandleState = "Fetch"
 	Create   HandleState = "Create"
 	Update   HandleState = "Update"
-	NotReady HandleState = "Not ready"
+	NotReady HandleState = "NotReady"
 	Ready    HandleState = "Ready"
 )
 
@@ -23,7 +23,7 @@ func (s HandleState) Done() bool { return s == Ready }
 func (s HandleState) OperationName() string {
 	switch s {
 	case NotReady, Ready:
-		return "Check"
+		return "Runtime Check"
 	}
 	return string(s)
 }
@@ -34,15 +34,15 @@ var MissingHandlerResourcesErr = errors.New("missing handler resources, cannot p
 // It exposes a simple Handle method which processes resource lifecycle.
 type Handler[T client.Object] struct {
 	Name       string
-	FetchFunc  func(obj T) error
-	CreateFunc func(obj T) error
-	UpdateFunc func(obj T) (bool, error)
-	IsReady    func(obj T) bool
+	FetchFunc  func(ctx context.Context, obj T) error
+	CreateFunc func(ctx context.Context, obj T) error
+	UpdateFunc func(ctx context.Context, obj T) (bool, error)
+	IsReady    func(ctx context.Context, obj T) bool
 }
 
 // Handle performs the workflow handling by invoking Handler functions in ordered manner.
 // Returns an error if data is missing or during operation failures.
-// TODO: Use eventing instead of logging to better track changes.
+// TODO: Use eventing instead of logging to better inform about changes.
 func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 	logger := log.FromContext(ctx)
 
@@ -53,7 +53,7 @@ func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 
 	// Fetch the object
 	shouldCreate := false
-	if err := h.FetchFunc(obj); err != nil {
+	if err := h.FetchFunc(ctx, obj); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			logger.Info(fmt.Sprintf("Marked object %T for CREATE", obj))
 			shouldCreate = true // not found, mark
@@ -64,7 +64,7 @@ func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 
 	// Create object if marked for creation
 	if shouldCreate {
-		if err := h.CreateFunc(obj); err != nil {
+		if err := h.CreateFunc(ctx, obj); err != nil {
 			return Create, fmt.Errorf("failed to create object %T: %w", obj, err) // critical create error occurred
 		} else {
 			logger.Info(fmt.Sprintf("Successfully ran CREATE for object %T", obj))
@@ -72,7 +72,7 @@ func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 	}
 
 	// Update object
-	updated, err := h.UpdateFunc(obj)
+	updated, err := h.UpdateFunc(ctx, obj)
 	if err != nil {
 		return Update, fmt.Errorf("failed to update object %T: %w", obj, err) // critical update error occurred
 	} else if updated {
@@ -80,7 +80,7 @@ func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 	}
 
 	// Check if object is ready
-	if h.IsReady(obj) {
+	if h.IsReady(ctx, obj) {
 		return Ready, nil
 	}
 	return NotReady, nil

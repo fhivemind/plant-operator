@@ -12,25 +12,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Plant) resource.Handler[*appsv1.Deployment] {
-	// create expected object
+// newDeploymentHandler creates deployment resource.Handler for the given Plant
+func (r *PlantReconciler) newDeploymentHandler(plant *apiv1.Plant) resource.Handler[*appsv1.Deployment] {
+	// Create expected object
 	expected := defineDeployment(plant)
 	r.Scheme.Default(expected)
 
-	// return handler
+	// Return handler
 	return resource.Handler[*appsv1.Deployment]{
-		Name: "deployment",
-		FetchFunc: func(object *appsv1.Deployment) error {
+		Name: "Deployment",
+		FetchFunc: func(ctx context.Context, object *appsv1.Deployment) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
-		CreateFunc: func(object *appsv1.Deployment) error {
+		CreateFunc: func(ctx context.Context, object *appsv1.Deployment) error {
 			expected.DeepCopyInto(object) // fill with required values
 			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
 			return r.Client.Create(ctx, object)
 		},
-		UpdateFunc: func(object *appsv1.Deployment) (bool, error) {
+		UpdateFunc: func(ctx context.Context, object *appsv1.Deployment) (bool, error) {
 			diff := utils.Diff(&expected.Spec, &object.Spec)
 			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
@@ -39,7 +40,7 @@ func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Pl
 			}
 			return false, diff.Error()
 		},
-		IsReady: func(object *appsv1.Deployment) bool {
+		IsReady: func(_ context.Context, object *appsv1.Deployment) bool {
 			return object.Status.AvailableReplicas == *plant.Spec.Replicas
 		},
 	}

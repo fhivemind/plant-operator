@@ -12,25 +12,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant) resource.Handler[*corev1.Service] {
-	// create expected object
+// newServiceHandler creates service resource.Handler for the given Plant
+func (r *PlantReconciler) newServiceHandler(plant *apiv1.Plant) resource.Handler[*corev1.Service] {
+	// Create expected object
 	expected := defineService(plant)
 	r.Scheme.Default(expected)
 
-	// return handler
+	// Return handler
 	return resource.Handler[*corev1.Service]{
-		Name: "service",
-		FetchFunc: func(object *corev1.Service) error {
+		Name: "Service",
+		FetchFunc: func(ctx context.Context, object *corev1.Service) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
-		CreateFunc: func(object *corev1.Service) error {
+		CreateFunc: func(ctx context.Context, object *corev1.Service) error {
 			expected.DeepCopyInto(object) // fill with required values
 			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
 			return r.Client.Create(ctx, object)
 		},
-		UpdateFunc: func(object *corev1.Service) (bool, error) {
+		UpdateFunc: func(ctx context.Context, object *corev1.Service) (bool, error) {
 			diff := utils.Diff(&expected.Spec, &object.Spec)
 			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
@@ -39,7 +40,7 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 			}
 			return false, diff.Error()
 		},
-		IsReady: func(object *corev1.Service) bool {
+		IsReady: func(_ context.Context, object *corev1.Service) bool {
 			return apiv1.ConditionsReady(object.Status.Conditions)
 		},
 	}

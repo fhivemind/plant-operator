@@ -11,25 +11,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant) resource.Handler[*networkingv1.Ingress] {
-	// create expected object
+// newIngressHandler creates ingress resource.Handler for the given Plant
+func (r *PlantReconciler) newIngressHandler(plant *apiv1.Plant) resource.Handler[*networkingv1.Ingress] {
+	// Create expected object
 	expected := defineIngress(plant)
 	r.Scheme.Default(expected)
 
-	// return handler
+	// Return handler
 	return resource.Handler[*networkingv1.Ingress]{
-		Name: "ingress",
-		FetchFunc: func(object *networkingv1.Ingress) error {
+		Name: "Ingress",
+		FetchFunc: func(ctx context.Context, object *networkingv1.Ingress) error {
 			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
-		CreateFunc: func(object *networkingv1.Ingress) error {
+		CreateFunc: func(ctx context.Context, object *networkingv1.Ingress) error {
 			expected.DeepCopyInto(object) // fill with required values
 			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
 				return err
 			}
 			return r.Client.Create(ctx, object)
 		},
-		UpdateFunc: func(object *networkingv1.Ingress) (bool, error) {
+		UpdateFunc: func(ctx context.Context, object *networkingv1.Ingress) (bool, error) {
 			diff := utils.Diff(&expected.Spec, &object.Spec)
 			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
@@ -38,7 +39,7 @@ func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant
 			}
 			return false, diff.Error()
 		},
-		IsReady: func(object *networkingv1.Ingress) bool {
+		IsReady: func(_ context.Context, object *networkingv1.Ingress) bool {
 			// TODO: when we add TLS, we can check it here
 			return true
 		},

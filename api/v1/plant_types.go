@@ -20,6 +20,7 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // PlantSpec defines the desired state of Plant
@@ -75,9 +76,10 @@ type PlantStatus struct {
 // ResourceStatus defines the observed state of Plant-managed or other objects.
 // If more context is required, embed into the object.
 type ResourceStatus struct {
-	Name  string `json:"name,omitempty"`
-	GVK   string `json:"gvk,omitempty"`
-	State State  `json:"state,omitempty"`
+	Name  string    `json:"name,omitempty"`
+	GVK   string    `json:"gvk,omitempty"`
+	UID   types.UID `json:"UID,omitempty"`
+	State State     `json:"state,omitempty"`
 }
 
 // ConditionType sets the type to a concrete type for safety.
@@ -181,6 +183,16 @@ func ConditionsReady(conditions []metav1.Condition) bool {
 		}
 	}
 	return true
+}
+
+// GetNotReadyConditions returns not ready conditions.
+func (plant *Plant) GetNotReadyConditions() (res []string) {
+	for _, condition := range plant.Status.Conditions {
+		if condition.Status != metav1.ConditionTrue {
+			res = append(res, condition.Type)
+		}
+	}
+	return
 }
 
 func init() {

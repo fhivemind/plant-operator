@@ -18,8 +18,8 @@ package controllers
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
 	"golang.org/x/sync/errgroup"
 	appsv1 "k8s.io/api/apps/v1"
@@ -33,8 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	apiv1 "github.com/fhivemind/plant-operator/api/v1"
+	"strings"
 )
 
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
@@ -67,6 +66,8 @@ func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // from the cluster. This method will fetch the controlled Plant object, ensure
 // that Plant has Finalizers and required states to safely address deletion, and
 // finally, invoke StateHandle to perform control tasks based on the requirements.
+// Reconcile relies on StateHandle to handle the request, and ErrorHandle to
+// handle the errors. Request will be rescheduled if an error occurs.
 func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling")
@@ -85,13 +86,12 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.Client.Update(ctx, plant); err != nil {
 			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after adding finalizers: %w", err))
 		}
-		logger.Info("Finalizer added, rescheduling")
-		return ctrl.Result{}, nil
+		logger.Info("Finalizer added to Plant")
 	}
 
 	// Check if plant scheduled but not configured for deletion
 	if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
-		if err := r.UpdateState(ctx, plant, apiv1.StateDeleting); err != nil {
+		if err := r.UpdateStatus(ctx, plant, withState(apiv1.StateDeleting)); err != nil {
 			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
 		}
 		logger.Info("Marked Plant for deletion")
@@ -102,13 +102,15 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err != nil {
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
 	}
+	logger.Info(fmt.Sprintf("Reconcile handled, requeue requested = %v", requeue))
 	return ctrl.Result{Requeue: requeue}, nil
 }
 
-// ErrorHandle logs the error, puts Plant into apiv1.StateError state, and reschedules the request.
+// ErrorHandle logs the error, puts Plant into apiv1.StateError state, and returns rescheduled result.
 func (r *PlantReconciler) ErrorHandle(ctx context.Context, plant *apiv1.Plant, err error) (ctrl.Result, error) {
 	log.FromContext(ctx).Error(err, "Error occurred, rescheduling")
-	return ctrl.Result{Requeue: true}, r.UpdateState(ctx, plant, apiv1.StateError)
+	_ = r.UpdateStatus(ctx, plant, withState(apiv1.StateError)) // we ignore this to avoid wrapping the same error
+	return ctrl.Result{Requeue: true}, err
 }
 
 // StateHandle runs the main control loop based on the configured Plant state.
@@ -118,49 +120,55 @@ func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (
 
 	switch state := plant.Status.State; state {
 	case apiv1.StateProcessing, apiv1.StateError: // Keep processing Plant until "Ready"
-		logger.Info(fmt.Sprintf("Handling %s state", state))
+		logger.Info(fmt.Sprintf("Handling Plant %s state", state))
 		return r.HandleProcessingState(ctx, plant)
 
 	case apiv1.StateDeleting: // Keep deleting until the Plant is gone
-		logger.Info(fmt.Sprintf("Handling %s state", state))
+		logger.Info(fmt.Sprintf("Handling Plant %s state", state))
 		return r.HandleDeletingState(ctx, plant)
 
-	default: // Reprocess since Plant is in "Ready" or unknown state
-		logger.Info("Marked for processing, rescheduling")
-		return true, r.UpdateState(ctx, plant, apiv1.StateProcessing)
+	case apiv1.StateReady: // Reprocess since reconcile was received
+		logger.Info("Handling Plant Refresh state")
+		return r.HandleProcessingState(ctx, plant)
+
+	default: // Reprocess since Plant is an unknown state
+		logger.Info("Marked Plant for Processing, rescheduling")
+		return true, r.UpdateStatus(ctx, plant, withState(apiv1.StateProcessing))
 	}
 }
 
 // HandleProcessingState processes all child resources by ensuring that they are in proper states.
-// Check doHandleWith to get more details on how child resource execution is handled.
+// Check runHandler to get more details on how child resource execution is handled.
 // Returns true if reconcile should be triggered. Updates Status with observed results.
 func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	// do processing
+	// Do processing for each handler
+	// TODO: this could be moved to factory, but maybe later...
 	deployment := &appsv1.Deployment{}
 	service := &corev1.Service{}
 	ingress := &networkingv1.Ingress{}
 
-	var errGroup errgroup.Group
-	errGroup.Go(func() error { return doHandleWith(ctx, plant, deployment, r.deploymentHandler(ctx, plant)) })
-	errGroup.Go(func() error { return doHandleWith(ctx, plant, service, r.serviceManager(ctx, plant)) })
-	errGroup.Go(func() error { return doHandleWith(ctx, plant, ingress, r.ingressManager(ctx, plant)) })
+	procGroup := errgroup.Group{}
+	procGroup.Go(func() error { return runHandler(ctx, plant, deployment, r.newDeploymentHandler(plant)) })
+	procGroup.Go(func() error { return runHandler(ctx, plant, service, r.newServiceHandler(plant)) })
+	procGroup.Go(func() error { return runHandler(ctx, plant, ingress, r.newIngressHandler(plant)) })
+	procErr := procGroup.Wait()
 
-	processingErr := errGroup.Wait()
-
-	// update states
+	// Calculate status
 	newState := plant.DetermineState()
 	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		logger.Info("All tasks done, setting Ready state")
-	} else {
-		logger.Info("Tasks are not yet in Ready state, rescheduling")
+		logger.Info("All tasks done, setting Plant to Ready state")
+	} else if newState != apiv1.StateReady {
+		logger.Info("Tasks for Plant are not yet in Ready state, rescheduling",
+			"not ready", plant.GetNotReadyConditions())
 	}
-	stateErr := r.UpdateState(ctx, plant, newState)
-	if stateErr != nil {
-		stateErr = fmt.Errorf("error while updating Plant status during processing: %w", stateErr)
-	}
-	return newState != apiv1.StateReady, errors.Join(processingErr, stateErr)
+
+	// Update status (with state) since processing updated it
+	// We ignore the error as it will be self corrected by the requeue
+	_ = r.UpdateStatus(ctx, plant, withState(newState))
+
+	return plant.Status.State != apiv1.StateReady, procErr
 }
 
 // HandleDeletingState remove all hanging resources. The garbage collector will
@@ -177,61 +185,48 @@ func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.
 	return false, nil
 }
 
-func (r *PlantReconciler) UpdateState(ctx context.Context, plant *apiv1.Plant, newState apiv1.State) error {
-	plant.Status.State = newState
-	return r.UpdateStatus(ctx, plant)
-}
-
-func (r *PlantReconciler) UpdateStatus(ctx context.Context, plant *apiv1.Plant) error {
-	if plant.Status.LastUpdateTime == nil {
-		plant.Status.LastUpdateTime = new(metav1.Time)
-	}
-	*plant.Status.LastUpdateTime = metav1.Now()
-	if err := r.Client.Status().Update(ctx, plant); err != nil {
-		return fmt.Errorf("could not update Plant status: %w", err)
-	}
-	return nil
-}
-
-// doHandleWith handles subresouce configuration and updates plant with the execution results.
+// runHandler handles sub-resource's execution and updates plant with the results.
 // It relies on dynamic resource.Handler to perform operations.
-func doHandleWith[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
-	// Define initial states
-	resourceState := apiv1.StateProcessing
-	conditionState := metav1.ConditionFalse
-
-	// Run handler and extract results
+func runHandler[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
+	// Execute handler
+	state := apiv1.StateProcessing
 	flow, err := handler.Handle(ctx, obj)
 	if err != nil { // generic fail
-		resourceState = apiv1.StateError
+		state = apiv1.StateError
 	} else if flow.Done() { // finished with success
-		resourceState = apiv1.StateReady
+		state = apiv1.StateReady
+	}
+
+	// Update plant condition
+	conditionState := metav1.ConditionFalse
+	if state == apiv1.StateReady {
 		conditionState = metav1.ConditionTrue
 	}
+	plant.UpdateCondition(
+		apiv1.ConditionType(handler.Name),
+		conditionState,
+		strings.ReplaceAll(fmt.Sprintf("%s%s%s", handler.Name, flow.OperationName(), state), " ", ""),
+		fmt.Sprintf("%s %s operation is in %s state", handler.Name, flow.OperationName(), state),
+	)
 
-	// Update plant resource conditions
-	plant.UpdateCondition(apiv1.ConditionType(handler.Name), conditionState, flow.OperationName(),
-		fmt.Sprintf("%s operation is in %s state", flow.OperationName(), resourceState))
-
-	// Update plant resource status
-	result := apiv1.ResourceStatus{
+	// Update plant status
+	resourceStatus := apiv1.ResourceStatus{
 		Name:  handler.Name,
 		GVK:   obj.GetObjectKind().GroupVersionKind().String(),
-		State: resourceState,
+		UID:   obj.GetUID(),
+		State: state,
 	}
-
 	found := false
 	for id, item := range plant.Status.Resources {
-		if item.Name == result.Name {
+		if item.Name == resourceStatus.Name {
 			found = true
-			plant.Status.Resources[id] = result
+			plant.Status.Resources[id] = resourceStatus
 			break
 		}
 	}
 	if !found {
-		plant.Status.Resources = append(plant.Status.Resources, result)
+		plant.Status.Resources = append(plant.Status.Resources, resourceStatus)
 	}
 
-	// Pass result once everything has been handled
 	return err
 }
