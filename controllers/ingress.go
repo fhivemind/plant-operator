@@ -30,13 +30,13 @@ func (r *PlantReconciler) ingressManager(ctx context.Context, plant *apiv1.Plant
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *networkingv1.Ingress) (bool, error) {
-			if yes, err := utils.IsSubsetOf(&expected.Spec, &object.Spec); yes {
+			diff := utils.Diff(&expected.Spec, &object.Spec)
+			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
-			} else {
-				return false, err
 			}
+			return false, diff.Error()
 		},
 		IsReady: func(object *networkingv1.Ingress) bool {
 			// TODO: when we add TLS, we can check it here

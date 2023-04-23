@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -18,6 +19,7 @@ const (
 )
 
 func (s HandleState) Done() bool { return s == Ready }
+
 func (s HandleState) OperationName() string {
 	switch s {
 	case NotReady, Ready:
@@ -25,6 +27,8 @@ func (s HandleState) OperationName() string {
 	}
 	return string(s)
 }
+
+var MissingHandlerResourcesErr = errors.New("missing handler resources, cannot perform handling")
 
 // Handler simplifies synchronization logic for a requested resource.
 // It exposes a simple Handle method which processes resource lifecycle.
@@ -36,8 +40,16 @@ type Handler[T client.Object] struct {
 	IsReady    func(obj T) bool
 }
 
+// Handle performs the workflow handling by invoking Handler functions in ordered manner.
+// Returns an error if data is missing or during operation failures.
+// TODO: Use eventing instead of logging to better track changes.
 func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 	logger := log.FromContext(ctx)
+
+	// validate
+	if op, err := h.validate(); err != nil {
+		return op, err
+	}
 
 	// Fetch the object
 	shouldCreate := false
@@ -72,4 +84,18 @@ func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 		return Ready, nil
 	}
 	return NotReady, nil
+}
+
+func (h *Handler[T]) validate() (HandleState, error) {
+	switch {
+	case h.FetchFunc == nil:
+		return Fetch, MissingHandlerResourcesErr
+	case h.CreateFunc == nil:
+		return Create, MissingHandlerResourcesErr
+	case h.UpdateFunc == nil:
+		return Update, MissingHandlerResourcesErr
+	case h.IsReady == nil:
+		return Ready, MissingHandlerResourcesErr
+	}
+	return "", nil
 }

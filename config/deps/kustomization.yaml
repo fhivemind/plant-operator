@@ -2,3 +2,4 @@ resources:
   - https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
   - https://github.com/cert-manager/cert-manager/releases/download/v1.11.0/cert-manager.yaml
   - https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+  - resources.yaml

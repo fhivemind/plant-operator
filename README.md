@@ -7,6 +7,7 @@ Kubernetes operator that deploys and exposes images on-the-fly
 ### Generic derivative approach
 This approach was used to monitor managed object changes to predefined values. 
 Complexities aside, it performs well, but needs to be further explored and tested to verify behaviour. 
+Check `pkg/utils/diff.go` for info.
 ```golang
 // expected defined somewhere
 expectedSpecsMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&expected.Spec)

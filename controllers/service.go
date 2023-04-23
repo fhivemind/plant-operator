@@ -31,13 +31,13 @@ func (r *PlantReconciler) serviceManager(ctx context.Context, plant *apiv1.Plant
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *corev1.Service) (bool, error) {
-			if yes, err := utils.IsSubsetOf(&expected.Spec, &object.Spec); yes {
+			diff := utils.Diff(&expected.Spec, &object.Spec)
+			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
-			} else {
-				return false, err
 			}
+			return false, diff.Error()
 		},
 		IsReady: func(object *corev1.Service) bool {
 			return apiv1.ConditionsReady(object.Status.Conditions)

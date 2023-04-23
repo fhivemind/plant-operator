@@ -31,13 +31,13 @@ func (r *PlantReconciler) deploymentHandler(ctx context.Context, plant *apiv1.Pl
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(object *appsv1.Deployment) (bool, error) {
-			if yes, err := utils.IsSubsetOf(&expected.Spec, &object.Spec); yes {
+			diff := utils.Diff(&expected.Spec, &object.Spec)
+			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
-			} else {
-				return false, err
 			}
+			return false, diff.Error()
 		},
 		IsReady: func(object *appsv1.Deployment) bool {
 			return object.Status.AvailableReplicas == *plant.Spec.Replicas
