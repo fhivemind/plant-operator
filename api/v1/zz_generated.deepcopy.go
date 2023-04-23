@@ -104,8 +104,8 @@ func (in *PlantSpec) DeepCopyInto(out *PlantSpec) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.TlsSecretRef != nil {
-		in, out := &in.TlsSecretRef, &out.TlsSecretRef
+	if in.TlsSecretName != nil {
+		in, out := &in.TlsSecretName, &out.TlsSecretName
 		*out = new(string)
 		**out = **in
 	}

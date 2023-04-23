@@ -19,8 +19,11 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
+    - jsonPath: .status.lastUpdateTime
+      name: Updated
+      type: date
     - jsonPath: .metadata.creationTimestamp
-      name: Age
+      name: Created
       type: date
     name: v1
     schema:
@@ -52,14 +55,16 @@ spec:
                   the deployed image will be accessible. Follows RFC 3986 standard.
                 type: string
               image:
-                description: Image specifies the image use for Deployment containers
+                description: Image specifies the image use for Deployment containers.
                 type: string
               ingressClassName:
-                description: 'TODO: Improve interface'
+                description: IngressClassName specifies the name of the Ingress controller
+                  to use. If not set, it will use cluster default Ingress class.
                 type: string
               issuerRef:
-                description: ObjectReference is a reference to an object with a given
-                  name, kind and group.
+                description: CertIssuerRef specifies the name of namespaced Issuer
+                  to use for obtaining certificates. If both TlsSecretRef and CertIssuerRef
+                  specified, TlsSecretRef will be prioritized.
                 properties:
                   group:
                     description: Group of the resource being referred to.
@@ -80,6 +85,9 @@ spec:
                 minimum: 1
                 type: integer
               tlsSecretRef:
+                description: TlsSecretName can be used to specify the name of an existing
+                  TLS secret for given host. It will be prioritized for security compared
+                  to CertIssuerRef.
                 type: string
             type: object
           status:

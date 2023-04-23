@@ -161,7 +161,7 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 		logger.Info("All tasks done, setting Plant to Ready state")
 	} else if newState != apiv1.StateReady {
 		logger.Info("Tasks for Plant are not yet in Ready state, rescheduling",
-			"not ready", plant.GetNotReadyConditions())
+			"not ready", plant.GetWaitingConditions())
 	}
 
 	// Update status (with state) since processing updated it

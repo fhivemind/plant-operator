@@ -25,31 +25,39 @@ import (
 
 // PlantSpec defines the desired state of Plant
 type PlantSpec struct {
-	// Image specifies the image use for Deployment containers
+	// Image specifies the image use for Deployment containers.
 	//+kubebuilder:validation:Required
 	Image string `json:"image,omitempty"`
 
-	// ContainerPort to expose for host traffic. Defaults to 80.
+	// ContainerPort to expose for host traffic.
+	// Defaults to 80.
 	// +optional
 	ContainerPort *int32 `json:"containerPort,omitempty"`
 
-	// Replicas defines the number of desired pods to deploy. Defaults to 1.
-	//+kubebuilder:validation:Minimum=1
+	// Replicas defines the number of desired pods to deploy.
+	// Defaults to 1.
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
 	// Host defines the domain name of a network host where the deployed image will be accessible.
 	// Follows RFC 3986 standard.
-	//+kubebuilder:validation:Required
+	// +kubebuilder:validation:Required
 	Host string `json:"host,omitempty"`
 
-	// TODO: Improve interface
+	// IngressClassName specifies the name of the Ingress controller to use. If not set,
+	// it will use cluster default Ingress class.
 	// +optional
 	IngressClassName *string `json:"ingressClassName,omitempty"`
 
+	// TlsSecretName can be used to specify the name of an existing TLS secret for given host.
+	// It will be prioritized for security compared to CertIssuerRef.
 	// +optional
-	TlsSecretRef *string `json:"tlsSecretRef,omitempty"`
+	TlsSecretName *string `json:"tlsSecretRef,omitempty"`
 
+	// CertIssuerRef specifies the name of namespaced Issuer to use for
+	// obtaining certificates. If both TlsSecretRef and CertIssuerRef specified,
+	// TlsSecretRef will be prioritized.
 	// +optional
 	CertIssuerRef *cmmeta.ObjectReference `json:"issuerRef,omitempty"`
 }
@@ -113,7 +121,8 @@ type PlantList struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.state"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+//+kubebuilder:printcolumn:name="Updated",type="date",JSONPath=".status.lastUpdateTime"
+//+kubebuilder:printcolumn:name="Created",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Plant is the Schema for the plants API.
 type Plant struct {
@@ -185,8 +194,8 @@ func ConditionsReady(conditions []metav1.Condition) bool {
 	return true
 }
 
-// GetNotReadyConditions returns not ready conditions.
-func (plant *Plant) GetNotReadyConditions() (res []string) {
+// GetWaitingConditions returns not ready conditions.
+func (plant *Plant) GetWaitingConditions() (res []string) {
 	for _, condition := range plant.Status.Conditions {
 		if condition.Status != metav1.ConditionTrue {
 			res = append(res, condition.Type)
