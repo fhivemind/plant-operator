@@ -34,33 +34,51 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 	for _, res := range results {
 		name := res.Name()
 		obj := res.Object()
-		ops := res.ProcessingOps()
-		opsStr := strings.Join(ops, ", ")
 
 		// Update resource available condition
-		ready, reason := false, "WaitingForReadyState"
-		msg := fmt.Sprintf("Resource %T is in Not Ready state", obj)
-		if err := res.Error(); err != nil {
-			ready, reason = false, "WaitingForNonErrorState"
-			msg = fmt.Sprintf("Resource %T is in Error state", obj)
+		ready := false
+		reason := "WaitingForReadyState"
+		message := fmt.Sprintf("Resource %T is in Not Ready state", obj)
 
-			r.Recorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
-				"Processed with error: %s", err.Error())
-		} else if res.Ready() {
-			ready, reason = true, "InReadyState"
-			msg = fmt.Sprintf("Resource %T is in Ready state", obj)
+		switch {
+		case res.Error() != nil: // ERROR STATE
+			message = fmt.Sprintf("Resource %T is in Error state", obj)
 
-			r.Recorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
-				"Successfully executed %s operation(s)", opsStr)
-		} else if res.Skipped() {
-			ready, reason = true, "RemovedFromStack"
-			msg = fmt.Sprintf("Removed %T from watched resources", obj)
+			r.Recorder.Eventf(plant, v1.EventTypeWarning,
+				fmt.Sprintf("%sProcessing", name),
+				"Reprocessing, Executed with error: %v", res.Error())
 
-			r.Recorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
-				"Successfully handled %s operation(s)", opsStr)
+		case res.Skipped(): // SKIPPED STATE
+			ready = true
+			reason = "RefreshSkipped"
+			message = fmt.Sprintf("Skipping resource %T as it was not requested", obj)
+
+			r.Recorder.Eventf(plant, v1.EventTypeNormal,
+				fmt.Sprintf("%sProcessing", name),
+				"Change detected, %s", message)
+
+		case res.Ready(): // READY STATE
+			ready = true
+			reason = "InReadyState"
+			message = fmt.Sprintf("Resource %T is in Ready state", obj)
+
+			if ops := res.ProcessingOps(); len(ops) > 0 {
+				r.Recorder.Eventf(plant, v1.EventTypeNormal,
+					fmt.Sprintf("%sProcessing", name),
+					"Done, %s. Executed %s operation(s)", message, strings.Join(ops, ", "))
+			} else {
+				r.Recorder.Eventf(plant, v1.EventTypeNormal,
+					fmt.Sprintf("%sProcessing", name),
+					"Done, %s", message)
+			}
+
+		default: // PROCESSING STATE
+			r.Recorder.Eventf(plant, v1.EventTypeNormal,
+				fmt.Sprintf("%sProcessing", name),
+				"Reprocessing, %s", message)
 		}
 
-		plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(name), ready, reason, msg)
+		plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(name), ready, reason, message)
 
 		// Update plant resource status
 		state := apiv1.StateProcessing
@@ -70,7 +88,7 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 			state = apiv1.StateReady
 		}
 
-		if !res.Skipped() || obj != nil { // skip adding for ignored resources
+		if !res.Skipped() || obj != nil { // only add non-ignored and non-nil results
 			plant.Status.Resources = append(plant.Status.Resources, apiv1.ResourceStatus{
 				Name:  name,
 				GVK:   obj.GetObjectKind().GroupVersionKind().String(),
