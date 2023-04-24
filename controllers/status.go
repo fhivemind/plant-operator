@@ -102,7 +102,7 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 	newState := plant.DetermineState()
 	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
 		r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All done, Plant is in Ready state")
-	} else {
+	} else if newState != apiv1.StateReady {
 		eventType := v1.EventTypeNormal
 		if newState == apiv1.StateError {
 			eventType = v1.EventTypeWarning
