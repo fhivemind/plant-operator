@@ -5,7 +5,9 @@ import (
 	"fmt"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"strings"
 )
 
@@ -35,55 +37,73 @@ func withState(state apiv1.State) func(*apiv1.Plant) {
 	}
 }
 
-func withClearedStatus() func(*apiv1.Plant) {
+func withClearedResources() func(*apiv1.Plant) {
 	return func(plant *apiv1.Plant) {
 		plant.Status.Resources = make([]apiv1.ResourceStatus, 0)
 	}
 }
 
-func withResults(results []resource.ExecuteResult) func(*apiv1.Plant) {
+// withResults will handle results from executions by adding them to Plant status
+// TODO: very ugly code, maybe fix a bit
+func withResults(eventRecorder record.EventRecorder, results []resource.ExecuteResult) func(*apiv1.Plant) {
+
 	return func(plant *apiv1.Plant) {
 		for _, res := range results {
+			// get dependencies
+			name := res.Name()
+			obj := res.Object()
+			ops := res.ProcessingOps()
+			opsStr := strings.Join(ops, ", ")
+
 			// update Processed condition
-			if ops := res.ProcessingOps(); len(ops) > 0 {
+			if len(ops) > 0 {
 				plant.UpdateCondition(
-					apiv1.ConditionTypesProcessedFor(res.Name()),
+					apiv1.ConditionTypesProcessedFor(name),
 					true,
 					fmt.Sprintf("%sDone", strings.Join(ops, "And")),
-					fmt.Sprintf("Performed %s operations for %T", strings.Join(ops, ", "), res.Object()),
+					fmt.Sprintf("Performed %s operations for %T", opsStr, obj),
 				)
 			} else if res.Skipped() {
 				plant.UpdateCondition(
-					apiv1.ConditionTypesProcessedFor(res.Name()),
+					apiv1.ConditionTypesProcessedFor(name),
 					true,
 					"RemovedFromStack",
-					fmt.Sprintf("Removed %T from watched resources", res.Object()),
+					fmt.Sprintf("Removed %T from watched resources", obj),
 				)
 			}
 
 			// update Available condition
 			status := true
 			reason := "InReadyState"
-			msg := fmt.Sprintf("Object %T is in Ready state", res.Object())
+			msg := fmt.Sprintf("Object %T is in Ready state", obj)
 			if err := res.Error(); err != nil {
 				status = false
 				reason = "WaitingForNonErrorState"
-				msg = fmt.Sprintf("Object %T is in Error state, reason: %s", res.Object(), err.Error())
+				msg = fmt.Sprintf("Object %T is in Error state", obj)
+
+				eventRecorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
+					"Handling resource %T exited with error: %s", obj, err.Error())
 			} else if res.NotReady() {
 				status = false
 				reason = "WaitingForReadyState"
-				msg = fmt.Sprintf("Object %T is in Not Ready state", res.Object())
+				msg = fmt.Sprintf("Object %T is in Not Ready state", obj)
+
+				eventRecorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
+					"Resource %T is not yet in Ready state", obj)
+			} else if len(ops) > 0 {
+				eventRecorder.Eventf(plant, v1.EventTypeWarning, fmt.Sprintf("%sProcessing", name),
+					"Successfully performed %s operation(s) for resource %T", opsStr, obj)
 			}
 
 			if res.Skipped() {
 				plant.UpdateCondition(
-					apiv1.ConditionTypeAvailableFor(res.Name()),
+					apiv1.ConditionTypeAvailableFor(name),
 					true,
 					"RemovedFromStack",
-					fmt.Sprintf("Removed %T from watched resources", res.Object()),
+					fmt.Sprintf("Removed %T from watched resources", obj),
 				)
 			} else {
-				plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(res.Name()), status, reason, msg)
+				plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(name), status, reason, msg)
 			}
 
 			// Update resource
@@ -94,11 +114,11 @@ func withResults(results []resource.ExecuteResult) func(*apiv1.Plant) {
 				state = apiv1.StateReady
 			}
 
-			if !res.Skipped() || res.Object() == nil { // skip adding for ignored resources
+			if !res.Skipped() || obj == nil { // skip adding for ignored resources
 				plant.Status.Resources = append(plant.Status.Resources, apiv1.ResourceStatus{
-					Name:  res.Name(),
-					GVK:   res.Object().GetObjectKind().GroupVersionKind().String(),
-					UID:   res.Object().GetUID(),
+					Name:  name,
+					GVK:   obj.GetObjectKind().GroupVersionKind().String(),
+					UID:   obj.GetUID(),
 					State: state,
 				})
 			}

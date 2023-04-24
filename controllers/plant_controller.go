@@ -18,16 +18,20 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/controllers/workflow"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"strings"
 )
 
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
@@ -47,6 +51,7 @@ type PlantReconciler struct {
 	Client   client.Client // differentiate Client and PlantReconciler calls
 	Scheme   *runtime.Scheme
 	Workflow workflow.Manager
+	Recorder record.EventRecorder
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -100,6 +105,8 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Execute main control loop
 	requeue, err := r.StateHandle(ctx, plant)
 	if err != nil {
+		r.Recorder.Eventf(plant, v1.EventTypeWarning, "Control", "Control loop errored with: %s",
+			errors.Unwrap(err).Error()) // TODO: good for now
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
 	}
 	logger.Info(fmt.Sprintf("Reconcile handled, requeue requested = %v", requeue))
@@ -144,17 +151,20 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 	logger := log.FromContext(ctx)
 
 	// Handle workflow
-	_ = r.UpdateStatus(ctx, plant, withClearedStatus())                 // cleanup status and do API update
+	_ = r.UpdateStatus(ctx, plant, withClearedResources())              // cleanup status and do API update
 	results, err := r.Workflow.WithClient(r.Client).Execute(ctx, plant) // execute workflow
-	applyStatusOpts(plant, withResults(results))                        // unload results but delay API update
+	applyStatusOpts(plant, withResults(r.Recorder, results))            // unload results but delay API update
 
 	// Calculate status
 	newState := plant.DetermineState()
+	notReadyItems := strings.Join(plant.GetWaitingConditions(), ",")
 	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		logger.Info("All tasks done, setting Plant to Ready state")
+		r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All tasks done for Plant")
 	} else if newState != apiv1.StateReady {
+		r.Recorder.Eventf(plant, v1.EventTypeNormal, "Processing",
+			"Reprocessing Plant as there are resources in Not Ready/Errored state: %s", notReadyItems)
 		logger.Info("Tasks for Plant are not yet in Ready state, rescheduling",
-			"not ready", plant.GetWaitingConditions())
+			"not ready", notReadyItems)
 	}
 
 	// Update status (with state) since processing updated it

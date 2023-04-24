@@ -18,7 +18,7 @@ The specifications of the operator are divided into two sections which control i
 - `host` (required): the domain name of a network host where the deployed image will be accessible.
 - `ingressClassName` (optional): the name of the Ingress controller to use.
 - `tlsSecretName` (optional): the name of an existing TLS secret for the given host.
-- `certIssuerRef` (optional): the name of local Issuer to use for obtaining certificates. 
+- `certIssuerRef` (optional): the name of local Issuer to use for obtaining certificates.
 
 Note: If both `tlsSecretName` and `certIssuerRef` are specified, `tlsSecretName` will be prioritized.
 

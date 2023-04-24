@@ -129,9 +129,10 @@ type PlantList struct {
 //+genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Image",type=string,JSONPath=".spec.image"
+//+kubebuilder:printcolumn:name="Host",type=string,JSONPath=".spec.host"
+//+kubebuilder:printcolumn:name="Replicas",type=string,JSONPath=".spec.replicas"
 //+kubebuilder:printcolumn:name="State",type=string,JSONPath=".status.state"
-//+kubebuilder:printcolumn:name="Updated",type="date",JSONPath=".status.lastUpdateTime"
-//+kubebuilder:printcolumn:name="Created",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Plant is the Schema for the plants API.
 type Plant struct {

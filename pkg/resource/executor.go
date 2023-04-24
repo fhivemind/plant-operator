@@ -3,7 +3,6 @@ package resource
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -86,14 +85,14 @@ func (h *Executor[T]) Execute(ctx context.Context, obj T) ExecuteResult {
 			shouldCreate = true // not found, mark
 			results.Add(Fetch)
 		} else {
-			return results.AddWithErr(Fetch, fmt.Errorf("failed to fetch object %T: %w", obj, err)) // critical fetch error occurred
+			return results.AddWithErr(Fetch, err) // critical fetch error occurred
 		}
 	}
 
 	// Create object if marked for creation
 	if shouldCreate {
 		if err := h.CreateFunc(ctx, obj); err != nil {
-			return results.AddWithErr(Create, fmt.Errorf("failed to create object %T: %w", obj, err)) // critical create error occurred
+			return results.AddWithErr(Create, err) // critical create error occurred
 		} else {
 			results.Add(Create)
 		}
@@ -102,7 +101,7 @@ func (h *Executor[T]) Execute(ctx context.Context, obj T) ExecuteResult {
 	// Update object
 	updated, err := h.UpdateFunc(ctx, obj)
 	if err != nil {
-		return results.AddWithErr(Update, fmt.Errorf("failed to update object %T: %w", obj, err)) // critical update error occurred
+		return results.AddWithErr(Update, err) // critical update error occurred
 	} else if updated {
 		results.Add(Update)
 	}

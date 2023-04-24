@@ -16,15 +16,18 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .spec.host
+      name: Host
+      type: string
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: string
     - jsonPath: .status.state
       name: State
       type: string
-    - jsonPath: .status.lastUpdateTime
-      name: Updated
-      type: date
-    - jsonPath: .metadata.creationTimestamp
-      name: Created
-      type: date
     name: v1
     schema:
       openAPIV3Schema:

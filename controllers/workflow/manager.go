@@ -59,7 +59,7 @@ func (m *manager) Client() client.Client { return m.client }
 
 func (m *manager) Execute(ctx context.Context, plant *apiv1.Plant) ([]resource.ExecuteResult, error) {
 	// Check client
-	if m.client != nil {
+	if m.client == nil {
 		return nil, ClientNotConfiguredErr
 	}
 
