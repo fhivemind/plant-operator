@@ -45,6 +45,23 @@ spec:
           spec:
             description: PlantSpec defines the desired state of Plant
             properties:
+              certIssuerRef:
+                description: CertIssuerRef specifies the name of namespaced Issuer
+                  to use for obtaining certificates. If both TlsSecretName and CertIssuerRef
+                  are specified, TlsSecretName will be used.
+                properties:
+                  group:
+                    description: Group of the resource being referred to.
+                    type: string
+                  kind:
+                    description: Kind of the resource being referred to.
+                    type: string
+                  name:
+                    description: Name of the resource being referred to.
+                    type: string
+                required:
+                - name
+                type: object
               containerPort:
                 description: ContainerPort to expose for host traffic. Defaults to
                   80.
@@ -61,32 +78,15 @@ spec:
                 description: IngressClassName specifies the name of the Ingress controller
                   to use. If not set, it will use cluster default Ingress class.
                 type: string
-              issuerRef:
-                description: CertIssuerRef specifies the name of namespaced Issuer
-                  to use for obtaining certificates. If both TlsSecretRef and CertIssuerRef
-                  specified, TlsSecretRef will be prioritized.
-                properties:
-                  group:
-                    description: Group of the resource being referred to.
-                    type: string
-                  kind:
-                    description: Kind of the resource being referred to.
-                    type: string
-                  name:
-                    description: Name of the resource being referred to.
-                    type: string
-                required:
-                - name
-                type: object
               replicas:
                 description: Replicas defines the number of desired pods to deploy.
                   Defaults to 1.
                 format: int32
                 minimum: 1
                 type: integer
-              tlsSecretRef:
+              tlsSecretName:
                 description: TlsSecretName can be used to specify the name of an existing
-                  TLS secret for given host. It will be prioritized for security compared
+                  TLS secret for given host. It will be prioritized for Tls compared
                   to CertIssuerRef.
                 type: string
             type: object

@@ -51,15 +51,15 @@ type PlantSpec struct {
 	IngressClassName *string `json:"ingressClassName,omitempty"`
 
 	// TlsSecretName can be used to specify the name of an existing TLS secret for given host.
-	// It will be prioritized for security compared to CertIssuerRef.
+	// It will be prioritized for Tls compared to CertIssuerRef.
 	// +optional
-	TlsSecretName *string `json:"tlsSecretRef,omitempty"`
+	TlsSecretName *string `json:"tlsSecretName,omitempty"`
 
 	// CertIssuerRef specifies the name of namespaced Issuer to use for
-	// obtaining certificates. If both TlsSecretRef and CertIssuerRef specified,
-	// TlsSecretRef will be prioritized.
+	// obtaining certificates. If both TlsSecretName and CertIssuerRef are
+	// specified, TlsSecretName will be used.
 	// +optional
-	CertIssuerRef *cmmeta.ObjectReference `json:"issuerRef,omitempty"`
+	CertIssuerRef *cmmeta.ObjectReference `json:"certIssuerRef,omitempty"`
 }
 
 // PlantStatus defines the observed state of Plant

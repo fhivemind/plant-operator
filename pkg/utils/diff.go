@@ -3,6 +3,7 @@ package utils
 import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/runtime"
+	"reflect"
 )
 
 type diff struct {
@@ -28,6 +29,10 @@ func (d *diff) NotEqual() bool {
 // Diff checks if expected is a subset of received with equal values.
 // Empty or default values are ignored. Passed values must be pointers, otherwise it will error.
 // Uses equality.Semantic for comparison, and runtime.UnstructuredConverter for map extraction.
+// Troublesome behaviour:
+//   - When fields on expected are removed, this will return that they are equal.
+//     Technically, that is not the case as they are not equal since the fields got removed (changed).
+//     In order to check that case, you can use Diff or DeepEqual on those fields only.
 func Diff(expected, received interface{}) *diff {
 	expectedMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(expected)
 	if err != nil {
@@ -48,4 +53,10 @@ func Diff(expected, received interface{}) *diff {
 		equal: equality.Semantic.DeepDerivative(expectedMap, receivedMap),
 		err:   nil,
 	}
+}
+
+// DeepEqual helps mitigate complete equality checks for objects.
+// Check notes for Diff for validation.
+func DeepEqual(expected, received interface{}) bool {
+	return !reflect.DeepEqual(expected, received)
 }

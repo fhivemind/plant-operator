@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
 	"golang.org/x/sync/errgroup"
@@ -40,11 +41,13 @@ import (
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses/status,verbs=get
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses/finalizers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status,verbs=get
 
 // PlantReconciler reconciles a Plant object
 type PlantReconciler struct {
@@ -59,6 +62,7 @@ func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(logPredicate())).
 		Owns(&corev1.Service{}, builder.WithPredicates(logPredicate())).
 		Owns(&networkingv1.Ingress{}, builder.WithPredicates(logPredicate())).
+		Owns(&certv1.Certificate{}, builder.WithPredicates(logPredicate())).
 		Complete(r)
 }
 
@@ -145,14 +149,21 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 
 	// Do processing for each handler
 	// TODO: this could be moved to factory, but maybe later...
+	procGroup := errgroup.Group{}
+
+	// Handle deployment
 	deployment := &appsv1.Deployment{}
 	service := &corev1.Service{}
-	ingress := &networkingv1.Ingress{}
-
-	procGroup := errgroup.Group{}
 	procGroup.Go(func() error { return runHandler(ctx, plant, deployment, r.newDeploymentHandler(plant)) })
 	procGroup.Go(func() error { return runHandler(ctx, plant, service, r.newServiceHandler(plant)) })
-	procGroup.Go(func() error { return runHandler(ctx, plant, ingress, r.newIngressHandler(plant)) })
+
+	// Handle networking
+	certificate := &certv1.Certificate{}
+	ingress := &networkingv1.Ingress{}
+	tlsSecretName, tlsHandler := r.newTlsOrNopHandler(plant)
+	procGroup.Go(func() error { return runHandler(ctx, plant, certificate, tlsHandler) })
+	procGroup.Go(func() error { return runHandler(ctx, plant, ingress, r.newIngressHandler(plant, tlsSecretName)) })
+
 	procErr := procGroup.Wait()
 
 	// Calculate status
@@ -206,7 +217,7 @@ func runHandler[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T,
 		apiv1.ConditionType(handler.Name),
 		conditionState,
 		strings.ReplaceAll(fmt.Sprintf("%s%s%s", handler.Name, flow.OperationName(), state), " ", ""),
-		fmt.Sprintf("%s %s operation is in %s state", handler.Name, flow.OperationName(), state),
+		fmt.Sprintf("%s operation for %s is in %s state", flow.OperationName(), handler.Name, state),
 	)
 
 	// Update plant status

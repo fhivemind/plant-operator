@@ -11,10 +11,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// newIngressHandler creates ingress resource.Handler for the given Plant
-func (r *PlantReconciler) newIngressHandler(plant *apiv1.Plant) resource.Handler[*networkingv1.Ingress] {
+// newIngressHandler creates ingress resource.Handler for the given Plant.
+// It also requires an tlsSecretName which will be used to determine
+// if IngressTLS should be added to Ingress.
+// If nil provided, it will not use IngressTLS (insecure Ingress).
+func (r *PlantReconciler) newIngressHandler(plant *apiv1.Plant, tlsSecretName *string) resource.Handler[*networkingv1.Ingress] {
 	// Create expected object
-	expected := defineIngress(plant)
+	expected := defineIngress(plant, tlsSecretName)
 	r.Scheme.Default(expected)
 
 	// Return handler
@@ -31,23 +34,35 @@ func (r *PlantReconciler) newIngressHandler(plant *apiv1.Plant) resource.Handler
 			return r.Client.Create(ctx, object)
 		},
 		UpdateFunc: func(ctx context.Context, object *networkingv1.Ingress) (bool, error) {
-			diff := utils.Diff(&expected.Spec, &object.Spec)
-			if diff.NotEqual() {
+			structDiff := utils.Diff(&expected.Spec, &object.Spec)
+			tlsChanged := !utils.DeepEqual(expected.Spec.TLS, object.Spec.TLS)
+			ingressClassChanged := !utils.DeepEqual(expected.Spec.IngressClassName, object.Spec.IngressClassName)
+			if structDiff.NotEqual() || tlsChanged || ingressClassChanged {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
 				return true, r.Client.Update(ctx, object)
 			}
-			return false, diff.Error()
+			return false, structDiff.Error()
 		},
 		IsReady: func(_ context.Context, object *networkingv1.Ingress) bool {
-			// TODO: when we add TLS, we can check it here
+			// TODO: can use ping here to check if valid
 			return true
 		},
 	}
 }
 
-func defineIngress(plant *apiv1.Plant) *networkingv1.Ingress {
-	pathType := networkingv1.PathTypePrefix
+func defineIngress(plant *apiv1.Plant, tlsSecretName *string) *networkingv1.Ingress {
+	// Define TLS specs if provided
+	var ingressTls []networkingv1.IngressTLS
+	if tlsSecretName != nil {
+		ingressTls = append(ingressTls, networkingv1.IngressTLS{
+			Hosts:      []string{plant.Spec.Host},
+			SecretName: *tlsSecretName,
+		})
+	}
+
+	// Return Ingress
+	ingressPathType := networkingv1.PathTypePrefix
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
@@ -56,6 +71,7 @@ func defineIngress(plant *apiv1.Plant) *networkingv1.Ingress {
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: plant.Spec.IngressClassName,
+			TLS:              ingressTls,
 			Rules: []networkingv1.IngressRule{
 				{
 					Host: plant.Spec.Host,
@@ -64,7 +80,7 @@ func defineIngress(plant *apiv1.Plant) *networkingv1.Ingress {
 							Paths: []networkingv1.HTTPIngressPath{
 								{
 									Path:     "/",
-									PathType: &pathType,
+									PathType: &ingressPathType,
 									Backend: networkingv1.IngressBackend{
 										Service: &networkingv1.IngressServiceBackend{
 											Name: plant.Name,

@@ -38,6 +38,19 @@ type Handler[T client.Object] struct {
 	CreateFunc func(ctx context.Context, obj T) error
 	UpdateFunc func(ctx context.Context, obj T) (bool, error)
 	IsReady    func(ctx context.Context, obj T) bool
+
+	// Nop indicates that no operation will be performed during Handle.
+	// Specify when Handler should do nothing.
+	Nop bool
+}
+
+// NopHandler is noop executor for workflows. It can be used to indicate
+// that requested operation is valid, but nothing to execute.
+func NopHandler[T client.Object](name string) Handler[T] {
+	return Handler[T]{
+		Name: name,
+		Nop:  true,
+	}
 }
 
 // Handle performs the workflow handling by invoking Handler functions in ordered manner.
@@ -46,7 +59,10 @@ type Handler[T client.Object] struct {
 func (h *Handler[T]) Handle(ctx context.Context, obj T) (HandleState, error) {
 	logger := log.FromContext(ctx)
 
-	// validate
+	// Validate
+	if h.Nop {
+		return Ready, nil
+	}
 	if op, err := h.validate(); err != nil {
 		return op, err
 	}
