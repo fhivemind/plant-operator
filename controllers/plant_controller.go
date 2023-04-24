@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"strings"
 )
 
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
@@ -61,7 +60,7 @@ func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// add sub-resource trackers
 	for _, managedResource := range r.Workflow.Managed() {
-		bldr = bldr.Owns(managedResource, builder.WithPredicates(logPredicate()))
+		bldr = bldr.Owns(managedResource, builder.WithPredicates(notifyEvent(r.Recorder)))
 	}
 
 	return bldr.Complete(r)
@@ -105,7 +104,7 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Execute main control loop
 	requeue, err := r.StateHandle(ctx, plant)
 	if err != nil {
-		r.Recorder.Eventf(plant, v1.EventTypeWarning, "Control", "Control loop errored with: %s",
+		r.Recorder.Eventf(plant, v1.EventTypeWarning, "Control", "Control errored with: %s",
 			errors.Unwrap(err).Error()) // TODO: good for now
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
 	}
@@ -148,31 +147,14 @@ func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (
 // Check runHandler to get more details on how child resource execution is handled.
 // Returns true if reconcile should be triggered. Updates Status with observed results.
 func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
-	logger := log.FromContext(ctx)
-
 	// Handle workflow
-	_ = r.UpdateStatus(ctx, plant, withClearedResources())              // cleanup status and do API update
-	results, err := r.Workflow.WithClient(r.Client).Execute(ctx, plant) // execute workflow
-	applyStatusOpts(plant, withResults(r.Recorder, results))            // unload results but delay API update
-
-	// Calculate status
-	newState := plant.DetermineState()
-	notReadyItems := strings.Join(plant.GetWaitingConditions(), ",")
-	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All tasks done for Plant")
-	} else if newState != apiv1.StateReady {
-		r.Recorder.Eventf(plant, v1.EventTypeNormal, "Processing",
-			"Reprocessing Plant as there are resources in Not Ready/Errored state: %s", notReadyItems)
-		logger.Info("Tasks for Plant are not yet in Ready state, rescheduling",
-			"not ready", notReadyItems)
-	}
+	execResults, execErr := r.Workflow.WithClient(r.Client).Execute(ctx, plant)
 
 	// Update status (with state) since processing updated it
 	// We ignore the error as it will be self corrected by the requeue
-	uerr := r.UpdateStatus(ctx, plant, withState(newState))
-	requeue := uerr != nil
+	uerr := r.UpdateResults(ctx, plant, execResults)
 
-	return plant.Status.State != apiv1.StateReady || requeue, err
+	return plant.Status.State != apiv1.StateReady || uerr != nil, execErr
 }
 
 // HandleDeletingState remove all hanging resources. The garbage collector will

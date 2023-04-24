@@ -94,10 +94,6 @@ type ResourceStatus struct {
 // ConditionType sets the type to a concrete type for safety.
 type ConditionType string
 
-func ConditionTypesProcessedFor(name string) ConditionType {
-	return ConditionType(fmt.Sprintf("%sProcessed", name))
-}
-
 func ConditionTypeAvailableFor(name string) ConditionType {
 	return ConditionType(fmt.Sprintf("%sAvailable", name))
 }

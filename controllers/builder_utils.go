@@ -1,35 +1,33 @@
 package controllers
 
 import (
-	"context"
-	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-// logPredicate will just inform who triggered the reconcile, usually used for resources.
-// TODO: maybe switch to eventing
-func logPredicate() predicate.Funcs {
+// notifyEvent will just inform who triggered the reconcile, usually used for resources tracking
+func notifyEvent(recorder record.EventRecorder) predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			log.FromContext(context.Background()).
-				Info(fmt.Sprintf("Received CREATE on subresource %T, reconciling", e.Object))
+			recorder.Eventf(e.Object, corev1.EventTypeNormal, "Trigger",
+				"Received CREATE event on resource %T, reconciling", e.Object)
 			return true
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			log.FromContext(context.Background()).
-				Info(fmt.Sprintf("Received DELETE on subresource %T, reconciling", e.Object))
+			recorder.Eventf(e.Object, corev1.EventTypeNormal, "Trigger",
+				"Received DELETE event on resource %T, reconciling", e.Object)
 			return true
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			log.FromContext(context.Background()).
-				Info(fmt.Sprintf("Received UPDATE on subresource %T, reconciling", e.ObjectNew))
+			recorder.Eventf(e.ObjectNew, corev1.EventTypeNormal, "Trigger",
+				"Received UPDATE event on resource %T, reconciling", e.ObjectNew)
 			return true
 		},
 		GenericFunc: func(e event.GenericEvent) bool {
-			log.FromContext(context.Background()).
-				Info(fmt.Sprintf("Received GENERIC on subresource %T, reconciling", e.Object))
+			recorder.Eventf(e.Object, corev1.EventTypeNormal, "Trigger",
+				"Received UPDATE event on resource %T, reconciling", e.Object)
 			return true
 		},
 	}

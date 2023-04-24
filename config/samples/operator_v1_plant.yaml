@@ -16,6 +16,6 @@ spec:
   host: "example.localhost1"
   ingressClassName: "nginx"
   # tlsSecretName: "ingress-tls"
-  certIssuerRef:
-    name: "unknown-issuer"
-    kind: "Issuer"
+#  tlsCertIssuerRef:
+#    name: "unknown-issuer"
+#    kind: "Issuer"

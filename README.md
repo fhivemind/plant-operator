@@ -1,38 +1,40 @@
-# plant-operator
-Kubernetes operator that deploys and exposes images on-the-fly
+# Plant Operator
 
+A Kubernetes operator that deploys and manages an application using custom deployment and networking rules.
+It is intended to deploy and expose images on-the-fly best suited for simple demos and testing environments.
+_Any changes to the underlying resources managed by Plant operator will force reconciliation to values
+specified by the CRD._
 
-## Object comparison
+The specifications of the operator are divided into two sections which control individual workflows.
 
-### Generic derivative approach
-This approach was used to monitor managed object changes to predefined values. 
-Complexities aside, it performs well, but needs to be further explored and tested to verify behaviour. 
-Check `pkg/utils/diff.go` for info.
-```golang
-// expected defined somewhere
-expectedSpecsMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&expected.Spec)
-receivedSpecsMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&received.Spec)
+### Deployment
 
-// check if fields that expected CONTAINS are semantically equal to ones received has
-if !equality.Semantic.DeepDerivative(expectedSpecsMap, receivedSpecsMap) {
-    // object was updated
-}
+- `image` (required): specifies the image to use for Deployment containers.
+- `containerPort` (optional, defaults to 80): the container port to expose for host traffic.
+- `replicas` (optional, defaults to 1): the number of desired pods to deploy.
+
+### Networking
+
+- `host` (required): the domain name of a network host where the deployed image will be accessible.
+- `ingressClassName` (optional): the name of the Ingress controller to use.
+- `tlsSecretName` (optional): the name of an existing TLS secret for the given host.
+- `tlsCertIssuerRef` (optional): the name of local or Cluster Issuer to use for obtaining certificates.
+
+Note: You can only specify `tlsSecretName` or `tlsCertIssuerRef` for adding TLS configuration to Ingress, but not both.
+
+## Examples
+
+```yaml
+apiVersion: operator.cisco.io/v1
+kind: Plant
+metadata:
+  name: example
+spec:
+  image: nginx:latest
+  containerPort: 8080
+  replicas: 3
+  host: example.com
+  ingressClassName: nginx
+  tlsCertIssuerRef:
+    name: my-issuer
 ```
-
-### Alternative idea: Selective object comparator
-For non-transformative and selective approach to comparison, objects that contain fields with non-zero default values,
-or for granular comparison. 
-Think: _selective, exact, close, or not really_. 
-Example: Structure that contains a lot of fields, but we are interested in specific ones to avoid dynamic injection checks.
-
-Extends https://github.com/cisco-open/k8s-objectmatcher
-
-- Let _expected_ and _actual_ be two objects which are marshall-able or reflect-able
-- Recurse through the objects to create field map with names and types
-- Compare to Options by depth and type, prioritize Exclusion by default, but offer options for filtering
-- Expose following options for comparison:
-  - `WithFields(...string)` => e.g. `OnlyFields(".Spec.[]Ports.*", ".Spec.Type")`
-  - `WithoutFields(...string)` => e.g. `WithoutFields(".Spec.[]Ports.NodePort", ".Spec.IPFamilies")`
-- Invoked as `Compare(expected, actual, ...Options)` and implements:
-  - `Equal() bool` - returns if they are equal
-  - `Error() error` - helps catch runtime errors, but pririotized through: base types, transforms, option misses and paradox cases.
