@@ -56,11 +56,13 @@ type PlantReconciler struct {
 // SetupWithManager sets up the controller with the Manager.
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	bldr := ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.Plant{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
+		For(&apiv1.Plant{}, builder.WithPredicates(
+			notifyWrapper(r.Recorder, predicate.GenerationChangedPredicate{}.Funcs)),
+		)
 
 	// add sub-resource trackers
 	for _, managedResource := range r.Workflow.Managed() {
-		bldr = bldr.Owns(managedResource, builder.WithPredicates(notifyEvent(r.Recorder)))
+		bldr = bldr.Owns(managedResource, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	}
 
 	return bldr.Complete(r)
@@ -98,17 +100,22 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if err := r.UpdateStatus(ctx, plant, withState(apiv1.StateDeleting)); err != nil {
 			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
 		}
-		logger.Info("Marked Plant for deletion")
+
+		r.Recorder.Eventf(plant, v1.EventTypeWarning,
+			"Delete",
+			"Marked Plant and sub-resources for deletion",
+		)
 	}
 
 	// Execute main control loop
 	requeue, err := r.StateHandle(ctx, plant)
 	if err != nil {
-		r.Recorder.Eventf(plant, v1.EventTypeWarning, "Control", "Control errored with: %s",
-			errors.Unwrap(err).Error()) // TODO: good for now
+		r.Recorder.Eventf(plant, v1.EventTypeWarning,
+			"Sync",
+			"Control errored with: %s", errors.Unwrap(err).Error(),
+		)
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
 	}
-	logger.Info(fmt.Sprintf("Reconcile handled, requeue requested = %v", requeue))
 	return ctrl.Result{Requeue: requeue}, nil
 }
 

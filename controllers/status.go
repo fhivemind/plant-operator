@@ -46,7 +46,8 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 
 			r.Recorder.Eventf(plant, v1.EventTypeWarning,
 				fmt.Sprintf("%sProcessing", name),
-				"Reprocessing, Executed with error: %v", res.Error())
+				"Reprocessing, Executed with error: %v", res.Error(),
+			)
 
 		case res.Skipped(): // SKIPPED STATE
 			ready = true
@@ -55,7 +56,8 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 
 			r.Recorder.Eventf(plant, v1.EventTypeNormal,
 				fmt.Sprintf("%sProcessing", name),
-				"Change detected, %s", message)
+				"Change detected, %s", message,
+			)
 
 		case res.Ready(): // READY STATE
 			ready = true
@@ -65,17 +67,20 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 			if ops := res.ProcessingOps(); len(ops) > 0 {
 				r.Recorder.Eventf(plant, v1.EventTypeNormal,
 					fmt.Sprintf("%sProcessing", name),
-					"Done, %s. Executed %s operation(s)", message, strings.Join(ops, ", "))
+					"Done, %s. Executed %s operation(s)", message, strings.Join(ops, ", "),
+				)
 			} else {
 				r.Recorder.Eventf(plant, v1.EventTypeNormal,
 					fmt.Sprintf("%sProcessing", name),
-					"Done, %s", message)
+					"Done, %s", message,
+				)
 			}
 
 		default: // PROCESSING STATE
 			r.Recorder.Eventf(plant, v1.EventTypeNormal,
 				fmt.Sprintf("%sProcessing", name),
-				"Reprocessing, %s", message)
+				"Reprocessing, %s", message,
+			)
 		}
 
 		plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(name), ready, reason, message)
@@ -101,15 +106,20 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 	// Handle main state
 	newState := plant.DetermineState()
 	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All done, Plant is in Ready state")
+		r.Recorder.Event(plant, v1.EventTypeNormal,
+			"Ready",
+			"All done, Plant is in Ready state",
+		)
 	} else if newState != apiv1.StateReady {
 		eventType := v1.EventTypeNormal
 		if newState == apiv1.StateError {
 			eventType = v1.EventTypeWarning
 		}
-		r.Recorder.Eventf(plant, eventType, "Processing",
+		r.Recorder.Eventf(plant, eventType,
+			"Processing",
 			"Reprocessing, Plant is in %s state due to conditions: %s",
-			newState, strings.Join(plant.GetWaitingConditions(), ", "))
+			newState, strings.Join(plant.GetWaitingConditions(), ", "),
+		)
 	}
 
 	// return updated
