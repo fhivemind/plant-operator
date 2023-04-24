@@ -109,8 +109,8 @@ func (in *PlantSpec) DeepCopyInto(out *PlantSpec) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.CertIssuerRef != nil {
-		in, out := &in.CertIssuerRef, &out.CertIssuerRef
+	if in.TlsCertIssuerRef != nil {
+		in, out := &in.TlsCertIssuerRef, &out.TlsCertIssuerRef
 		*out = new(metav1.ObjectReference)
 		**out = **in
 	}

@@ -15,7 +15,7 @@ spec:
   replicas: 2
   host: "example.localhost1"
   ingressClassName: "nginx"
-  #tlsSecretRef: "ingress-tls"
-  issuerRef:
-    name: "selfsigned-issuer"
+  # tlsSecretName: "ingress-tls"
+  certIssuerRef:
+    name: "unknown-issuer"
     kind: "Issuer"

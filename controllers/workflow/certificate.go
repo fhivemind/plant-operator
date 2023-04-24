@@ -1,4 +1,4 @@
-package controllers
+package workflow
 
 import (
 	"context"
@@ -13,49 +13,49 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// newTlsOrNopHandler creates either a resource.Handler or resource.NopHandler depending on the state of Plant.
+// newTlsOrNopHandler creates either a resource.Executor or resource.NopExecutor depending on the state of Plant.
 // Following cases can occur:
 //
-//		 a) No Tls requested, returns nil and resource.NopHandler
-//		 b) Tls Secret requested, returns plant.Spec.TlsSecretName and resource.NopHandler
+//		 a) No Tls requested, returns nil and resource.NopExecutor
+//		 b) Tls Secret requested, returns plant.Spec.TlsSecretName and resource.NopExecutor
 //	 	 c) CertIssuer requested, returns secret name issued by CertIssuer and certificate handler
 //
 // The workflow selection is handled from Plant resource.
-func (r *PlantReconciler) newTlsOrNopHandler(plant *apiv1.Plant) (*string, resource.Handler[*certv1.Certificate]) {
-	// a) Nothing selected, return nil and Nop handler
-	if plant.Spec.TlsSecretName == nil && plant.Spec.CertIssuerRef == nil {
-		return nil, resource.NopHandler[*certv1.Certificate]("Certificate")
+func (m *manager) newTlsOrNopHandler(plant *apiv1.Plant) (*string, resource.Executor[*certv1.Certificate]) {
+	// a) Nothing selected, return nil and nop handler
+	if plant.Spec.TlsSecretName == nil && plant.Spec.TlsCertIssuerRef == nil {
+		return nil, resource.NopExecutor[*certv1.Certificate]("Certificate")
 	}
 
-	// b) Tls only, return the secret name and Nop handler
+	// b) Tls only, return the secret name and nop handler
 	if plant.Spec.TlsSecretName != nil {
-		return plant.Spec.TlsSecretName, resource.NopHandler[*certv1.Certificate]("Certificate")
+		return plant.Spec.TlsSecretName, resource.NopExecutor[*certv1.Certificate]("Certificate")
 	}
 
 	// c) CertManager only, return certificate secret name and handler
 	// Create expected object
 	expected := defineCertificate(plant)
-	r.Scheme.Default(expected)
+	m.Client().Scheme().Default(expected)
 
 	// Return handler
-	return &expected.Spec.SecretName, resource.Handler[*certv1.Certificate]{
+	return &expected.Spec.SecretName, resource.Executor[*certv1.Certificate]{
 		Name: "Certificate",
 		FetchFunc: func(ctx context.Context, object *certv1.Certificate) error {
-			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
+			return m.Client().Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
 		CreateFunc: func(ctx context.Context, object *certv1.Certificate) error {
 			expected.DeepCopyInto(object) // fill with required values
-			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
+			if err := controllerutil.SetControllerReference(plant, object, m.Client().Scheme()); err != nil {
 				return err
 			}
-			return r.Client.Create(ctx, object)
+			return m.Client().Create(ctx, object)
 		},
 		UpdateFunc: func(ctx context.Context, object *certv1.Certificate) (bool, error) {
 			diff := utils.Diff(&expected.Spec, &object.Spec)
 			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
-				return true, r.Client.Update(ctx, object)
+				return true, m.Client().Update(ctx, object)
 			}
 			return false, diff.Error()
 		},
@@ -81,7 +81,7 @@ func defineCertificate(plant *apiv1.Plant) *certv1.Certificate {
 		Spec: certv1.CertificateSpec{
 			SecretName: fmt.Sprintf("%s-tls", plant.Name),
 			DNSNames:   []string{plant.Spec.Host},
-			IssuerRef:  *plant.Spec.CertIssuerRef,
+			IssuerRef:  *plant.Spec.TlsCertIssuerRef,
 		},
 	}
 }

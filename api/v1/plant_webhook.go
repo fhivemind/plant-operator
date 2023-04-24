@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -63,23 +64,41 @@ var _ webhook.Validator = &Plant{}
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *Plant) ValidateCreate() error {
 	plantlog.Info("validate create", "name", r.Name)
-
-	// TODO(user): fill in your validation logic upon object creation.
-	return nil
+	return r.validate()
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *Plant) ValidateUpdate(old runtime.Object) error {
 	plantlog.Info("validate update", "name", r.Name)
-
-	// TODO(user): fill in your validation logic upon object update.
-	return nil
+	return r.validate()
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
 func (r *Plant) ValidateDelete() error {
 	plantlog.Info("validate delete", "name", r.Name)
+	return r.validate()
+}
 
-	// TODO(user): fill in your validation logic upon object deletion.
+// validate runs general validation on Plant
+func (r *Plant) validate() error {
+	switch {
+	case r.Spec.Image == "":
+		return errors.New(".spec.image is required")
+
+	case r.Spec.Host == "":
+		return errors.New(".spec.host is required")
+
+	case r.Spec.IngressClassName != nil && *r.Spec.IngressClassName == "":
+		return errors.New(".spec.ingressClassName provided but empty")
+
+	case r.Spec.TlsSecretName != nil && *r.Spec.TlsSecretName == "":
+		return errors.New(".spec.tlsSecretName provided but empty")
+
+	case r.Spec.TlsCertIssuerRef != nil && r.Spec.TlsCertIssuerRef.Name == "":
+		return errors.New(".spec.tlsCertIssuerRef.Name cannot be empty")
+
+	case r.Spec.TlsSecretName != nil && r.Spec.TlsCertIssuerRef != nil:
+		return errors.New("both .spec.tlsSecretName and .spec.tlsCertIssuerRef provided but only one required")
+	}
 	return nil
 }

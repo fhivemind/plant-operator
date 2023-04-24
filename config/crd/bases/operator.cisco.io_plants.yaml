@@ -45,23 +45,6 @@ spec:
           spec:
             description: PlantSpec defines the desired state of Plant
             properties:
-              certIssuerRef:
-                description: CertIssuerRef specifies the name of namespaced Issuer
-                  to use for obtaining certificates. If both TlsSecretName and CertIssuerRef
-                  are specified, TlsSecretName will be used.
-                properties:
-                  group:
-                    description: Group of the resource being referred to.
-                    type: string
-                  kind:
-                    description: Kind of the resource being referred to.
-                    type: string
-                  name:
-                    description: Name of the resource being referred to.
-                    type: string
-                required:
-                - name
-                type: object
               containerPort:
                 description: ContainerPort to expose for host traffic. Defaults to
                   80.
@@ -84,10 +67,27 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              tlsCertIssuerRef:
+                description: TlsCertIssuerRef specifies the name Cert Manager Issuer
+                  to use for obtaining certificates. Specify either TlsSecretName
+                  or TlsCertIssuerRef, but not both.
+                properties:
+                  group:
+                    description: Group of the resource being referred to.
+                    type: string
+                  kind:
+                    description: Kind of the resource being referred to.
+                    type: string
+                  name:
+                    description: Name of the resource being referred to.
+                    type: string
+                required:
+                - name
+                type: object
               tlsSecretName:
                 description: TlsSecretName can be used to specify the name of an existing
-                  TLS secret for given host. It will be prioritized for Tls compared
-                  to CertIssuerRef.
+                  TLS secret for given host. Specify either TlsSecretName or TlsCertIssuerRef,
+                  but not both.
                 type: string
             type: object
           status:

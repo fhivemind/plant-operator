@@ -1,4 +1,4 @@
-package controllers
+package workflow
 
 import (
 	"context"
@@ -12,31 +12,31 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// newDeploymentHandler creates deployment resource.Handler for the given Plant
-func (r *PlantReconciler) newDeploymentHandler(plant *apiv1.Plant) resource.Handler[*appsv1.Deployment] {
+// newDeploymentHandler creates deployment resource.Executor for the given Plant
+func (m *manager) newDeploymentHandler(plant *apiv1.Plant) resource.Executor[*appsv1.Deployment] {
 	// Create expected object
 	expected := defineDeployment(plant)
-	r.Scheme.Default(expected)
+	m.Client().Scheme().Default(expected)
 
 	// Return handler
-	return resource.Handler[*appsv1.Deployment]{
+	return resource.Executor[*appsv1.Deployment]{
 		Name: "Deployment",
 		FetchFunc: func(ctx context.Context, object *appsv1.Deployment) error {
-			return r.Client.Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
+			return m.Client().Get(ctx, types.NamespacedName{Namespace: expected.Namespace, Name: expected.Name}, object)
 		},
 		CreateFunc: func(ctx context.Context, object *appsv1.Deployment) error {
 			expected.DeepCopyInto(object) // fill with required values
-			if err := controllerutil.SetControllerReference(plant, object, r.Client.Scheme()); err != nil {
+			if err := controllerutil.SetControllerReference(plant, object, m.Client().Scheme()); err != nil {
 				return err
 			}
-			return r.Client.Create(ctx, object)
+			return m.Client().Create(ctx, object)
 		},
 		UpdateFunc: func(ctx context.Context, object *appsv1.Deployment) (bool, error) {
 			diff := utils.Diff(&expected.Spec, &object.Spec)
 			if diff.NotEqual() {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)
-				return true, r.Client.Update(ctx, object)
+				return true, m.Client().Update(ctx, object)
 			}
 			return false, diff.Error()
 		},

@@ -19,14 +19,8 @@ package controllers
 import (
 	"context"
 	"fmt"
-	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
-	"github.com/fhivemind/plant-operator/pkg/resource"
-	"golang.org/x/sync/errgroup"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/fhivemind/plant-operator/controllers/workflow"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -34,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"strings"
 )
 
 //+kubebuilder:rbac:groups=operator.cisco.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
@@ -51,19 +44,22 @@ import (
 
 // PlantReconciler reconciles a Plant object
 type PlantReconciler struct {
-	Client client.Client // differentiate Client and PlantReconciler calls
-	Scheme *runtime.Scheme
+	Client   client.Client // differentiate Client and PlantReconciler calls
+	Scheme   *runtime.Scheme
+	Workflow workflow.Manager
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiv1.Plant{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Owns(&appsv1.Deployment{}, builder.WithPredicates(logPredicate())).
-		Owns(&corev1.Service{}, builder.WithPredicates(logPredicate())).
-		Owns(&networkingv1.Ingress{}, builder.WithPredicates(logPredicate())).
-		Owns(&certv1.Certificate{}, builder.WithPredicates(logPredicate())).
-		Complete(r)
+	bldr := ctrl.NewControllerManagedBy(mgr).
+		For(&apiv1.Plant{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
+
+	// add sub-resource trackers
+	for _, managedResource := range r.Workflow.Managed() {
+		bldr = bldr.Owns(managedResource, builder.WithPredicates(logPredicate()))
+	}
+
+	return bldr.Complete(r)
 }
 
 // Reconcile ensures that Plant and its owned resources match the required states
@@ -101,7 +97,7 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		logger.Info("Marked Plant for deletion")
 	}
 
-	// Run main control loop
+	// Execute main control loop
 	requeue, err := r.StateHandle(ctx, plant)
 	if err != nil {
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
@@ -147,24 +143,10 @@ func (r *PlantReconciler) StateHandle(ctx context.Context, plant *apiv1.Plant) (
 func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv1.Plant) (bool, error) {
 	logger := log.FromContext(ctx)
 
-	// Do processing for each handler
-	// TODO: this could be moved to factory, but maybe later...
-	procGroup := errgroup.Group{}
-
-	// Handle deployment
-	deployment := &appsv1.Deployment{}
-	service := &corev1.Service{}
-	procGroup.Go(func() error { return runHandler(ctx, plant, deployment, r.newDeploymentHandler(plant)) })
-	procGroup.Go(func() error { return runHandler(ctx, plant, service, r.newServiceHandler(plant)) })
-
-	// Handle networking
-	certificate := &certv1.Certificate{}
-	ingress := &networkingv1.Ingress{}
-	tlsSecretName, tlsHandler := r.newTlsOrNopHandler(plant)
-	procGroup.Go(func() error { return runHandler(ctx, plant, certificate, tlsHandler) })
-	procGroup.Go(func() error { return runHandler(ctx, plant, ingress, r.newIngressHandler(plant, tlsSecretName)) })
-
-	procErr := procGroup.Wait()
+	// Handle workflow
+	_ = r.UpdateStatus(ctx, plant, withClearedStatus())                 // cleanup status and do API update
+	results, err := r.Workflow.WithClient(r.Client).Execute(ctx, plant) // execute workflow
+	applyStatusOpts(plant, withResults(results))                        // unload results but delay API update
 
 	// Calculate status
 	newState := plant.DetermineState()
@@ -177,9 +159,10 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 
 	// Update status (with state) since processing updated it
 	// We ignore the error as it will be self corrected by the requeue
-	_ = r.UpdateStatus(ctx, plant, withState(newState))
+	uerr := r.UpdateStatus(ctx, plant, withState(newState))
+	requeue := uerr != nil
 
-	return plant.Status.State != apiv1.StateReady, procErr
+	return plant.Status.State != apiv1.StateReady || requeue, err
 }
 
 // HandleDeletingState remove all hanging resources. The garbage collector will
@@ -194,50 +177,4 @@ func (r *PlantReconciler) HandleDeletingState(ctx context.Context, plant *apiv1.
 		}
 	}
 	return false, nil
-}
-
-// runHandler handles sub-resource's execution and updates plant with the results.
-// It relies on dynamic resource.Handler to perform operations.
-func runHandler[T client.Object](ctx context.Context, plant *apiv1.Plant, obj T, handler resource.Handler[T]) error {
-	// Execute handler
-	state := apiv1.StateProcessing
-	flow, err := handler.Handle(ctx, obj)
-	if err != nil { // generic fail
-		state = apiv1.StateError
-	} else if flow.Done() { // finished with success
-		state = apiv1.StateReady
-	}
-
-	// Update plant condition
-	conditionState := metav1.ConditionFalse
-	if state == apiv1.StateReady {
-		conditionState = metav1.ConditionTrue
-	}
-	plant.UpdateCondition(
-		apiv1.ConditionType(handler.Name),
-		conditionState,
-		strings.ReplaceAll(fmt.Sprintf("%s%s%s", handler.Name, flow.OperationName(), state), " ", ""),
-		fmt.Sprintf("%s operation for %s is in %s state", flow.OperationName(), handler.Name, state),
-	)
-
-	// Update plant status
-	resourceStatus := apiv1.ResourceStatus{
-		Name:  handler.Name,
-		GVK:   obj.GetObjectKind().GroupVersionKind().String(),
-		UID:   obj.GetUID(),
-		State: state,
-	}
-	found := false
-	for id, item := range plant.Status.Resources {
-		if item.Name == resourceStatus.Name {
-			found = true
-			plant.Status.Resources[id] = resourceStatus
-			break
-		}
-	}
-	if !found {
-		plant.Status.Resources = append(plant.Status.Resources, resourceStatus)
-	}
-
-	return err
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"fmt"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,15 +52,15 @@ type PlantSpec struct {
 	IngressClassName *string `json:"ingressClassName,omitempty"`
 
 	// TlsSecretName can be used to specify the name of an existing TLS secret for given host.
-	// It will be prioritized for Tls compared to CertIssuerRef.
+	// Specify either TlsSecretName or TlsCertIssuerRef, but not both.
 	// +optional
 	TlsSecretName *string `json:"tlsSecretName,omitempty"`
 
-	// CertIssuerRef specifies the name of namespaced Issuer to use for
-	// obtaining certificates. If both TlsSecretName and CertIssuerRef are
-	// specified, TlsSecretName will be used.
+	// TlsCertIssuerRef specifies the name Cert Manager Issuer to use for
+	// obtaining certificates.
+	// Specify either TlsSecretName or TlsCertIssuerRef, but not both.
 	// +optional
-	CertIssuerRef *cmmeta.ObjectReference `json:"certIssuerRef,omitempty"`
+	TlsCertIssuerRef *cmmeta.ObjectReference `json:"tlsCertIssuerRef,omitempty"`
 }
 
 // PlantStatus defines the observed state of Plant
@@ -92,6 +93,14 @@ type ResourceStatus struct {
 
 // ConditionType sets the type to a concrete type for safety.
 type ConditionType string
+
+func ConditionTypesProcessedFor(name string) ConditionType {
+	return ConditionType(fmt.Sprintf("%sProcessed", name))
+}
+
+func ConditionTypeAvailableFor(name string) ConditionType {
+	return ConditionType(fmt.Sprintf("%sAvailable", name))
+}
 
 // State defines all possible resource states
 // +kubebuilder:validation:Enum=Processing;Deleting;Ready;Error;""
@@ -155,14 +164,24 @@ func (plant *Plant) ConditionsReady() bool {
 }
 
 // UpdateCondition updates specific condition based on type.
-func (plant *Plant) UpdateCondition(conditionType ConditionType, status metav1.ConditionStatus, reason, msg string) {
+func (plant *Plant) UpdateCondition(conditionType ConditionType, status bool, reason, msg string) {
+	condStatus := metav1.ConditionFalse
+	if status {
+		condStatus = metav1.ConditionTrue
+	}
+
 	meta.SetStatusCondition(&plant.Status.Conditions, metav1.Condition{
 		Type:               string(conditionType),
-		Status:             status,
+		Status:             condStatus,
 		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: plant.GetGeneration(),
 	})
+}
+
+// RemoveCondition removes a condiditon
+func (plant *Plant) RemoveCondition(conditionType ConditionType) {
+	meta.RemoveStatusCondition(&plant.Status.Conditions, string(conditionType))
 }
 
 // ContainsCondition returns true if the given condition is equal to any of the statuses.
