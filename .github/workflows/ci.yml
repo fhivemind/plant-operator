@@ -13,8 +13,6 @@ on:
   release:
     types: [published]
 
-permissions: read-all
-
 ## Variable list
 # secret.DOCKERHUB_USERNAME
 # secret.DOCKERHUB_TOKEN
