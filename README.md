@@ -31,7 +31,7 @@ Note: You should only specify `tlsSecretName` or `tlsCertIssuerRef` for adding T
 ### Example
 A configurable version depending on the requirements could look something like this:
 ```yaml
-apiVersion: operator.cisco.io/v1
+apiVersion: operator.fhivemind.io/v1
 kind: Plant
 metadata:
   name: example

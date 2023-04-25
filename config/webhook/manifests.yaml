@@ -11,12 +11,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-operator-cisco-io-v1-plant
+      path: /mutate-operator-fhivemind-io-v1-plant
   failurePolicy: Fail
   name: mplant.kb.io
   rules:
   - apiGroups:
-    - operator.cisco.io
+    - operator.fhivemind.io
     apiVersions:
     - v1
     operations:
@@ -38,12 +38,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-operator-cisco-io-v1-plant
+      path: /validate-operator-fhivemind-io-v1-plant
   failurePolicy: Fail
   name: vplant.kb.io
   rules:
   - apiGroups:
-    - operator.cisco.io
+    - operator.fhivemind.io
     apiVersions:
     - v1
     operations:

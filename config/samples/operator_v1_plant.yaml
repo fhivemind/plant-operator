@@ -1,4 +1,4 @@
-apiVersion: operator.cisco.io/v1
+apiVersion: operator.fhivemind.io/v1
 kind: Plant
 metadata:
   labels:

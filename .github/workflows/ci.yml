@@ -13,8 +13,6 @@ on:
   release:
     types: [published]
 
-permissions: read-all
-
 ## Variable list
 # secret.DOCKERHUB_USERNAME
 # secret.DOCKERHUB_TOKEN
@@ -91,6 +89,7 @@ jobs:
         with:
           filename: coverage.xml
           format: markdown
+          output: both
 
       - name: Post - Add to PR Comment
         uses: marocchino/sticky-pull-request-comment@v2
@@ -122,7 +121,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: ${{ env.RELEASE_NAME }}:latest
+          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.RELEASE_NAME }}:latest
 
       ### RELEASE STEPS
 

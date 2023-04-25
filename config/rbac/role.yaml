@@ -78,7 +78,7 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - operator.cisco.io
+  - operator.fhivemind.io
   resources:
   - plants
   verbs:
@@ -90,13 +90,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - operator.cisco.io
+  - operator.fhivemind.io
   resources:
   - plants/finalizers
   verbs:
   - update
 - apiGroups:
-  - operator.cisco.io
+  - operator.fhivemind.io
   resources:
   - plants/status
   verbs:
