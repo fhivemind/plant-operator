@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/controllers/workflow"
@@ -57,7 +56,7 @@ type PlantReconciler struct {
 func (r *PlantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&apiv1.Plant{}, builder.WithPredicates(
-			notifyWrapper(r.Recorder, predicate.GenerationChangedPredicate{}.Funcs)),
+			notifyWrapper(r.Recorder, predicate.GenerationChangedPredicate{})),
 		)
 
 	// add sub-resource trackers
@@ -85,35 +84,28 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Add finalizers to plant if missing
-	if controllerutil.AddFinalizer(plant, apiv1.Finalizer) {
-		// Since Update will trigger reconcile, there is no need to finish this request.
-		// If it fails, error handler will reschedule it anyway
-		if err := r.Client.Update(ctx, plant); err != nil {
-			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after adding finalizers: %w", err))
-		}
-		logger.Info("Finalizer added to Plant")
-	}
-
-	// Check if plant scheduled but not configured for deletion
-	if !plant.DeletionTimestamp.IsZero() && plant.Status.State != apiv1.StateDeleting {
-		if err := r.UpdateStatus(ctx, plant, withState(apiv1.StateDeleting)); err != nil {
-			return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
+	// Check if the object is in correct state
+	if plant.Status.State != apiv1.StateDeleting {
+		// Add finalizers to plant if missing
+		if controllerutil.AddFinalizer(plant, apiv1.Finalizer) {
+			if err := r.Client.Update(ctx, plant); err != nil {
+				return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant after adding finalizers: %w", err))
+			}
+			logger.Info("Finalizer added to Plant")
 		}
 
-		r.Recorder.Eventf(plant, v1.EventTypeWarning,
-			"Delete",
-			"Marked Plant and sub-resources for deletion",
-		)
+		// Set correct state if requested for deletion
+		if !plant.DeletionTimestamp.IsZero() {
+			if err := r.UpdateStatus(ctx, plant, withState(apiv1.StateDeleting)); err != nil {
+				return r.ErrorHandle(ctx, plant, fmt.Errorf("could not update Plant status after triggering deletion: %w", err))
+			}
+			r.Recorder.Eventf(plant, v1.EventTypeWarning, "Delete", "Marked Plant and its resources for deletion")
+		}
 	}
 
 	// Execute main control loop
 	requeue, err := r.StateHandle(ctx, plant)
 	if err != nil {
-		r.Recorder.Eventf(plant, v1.EventTypeWarning,
-			"Sync",
-			"Control errored with: %s", errors.Unwrap(err).Error(),
-		)
 		return r.ErrorHandle(ctx, plant, fmt.Errorf("could not handle Plant control loop: %w", err))
 	}
 	return ctrl.Result{Requeue: requeue}, nil
@@ -121,8 +113,9 @@ func (r *PlantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 // ErrorHandle logs the error, puts Plant into apiv1.StateError state, and returns rescheduled result.
 func (r *PlantReconciler) ErrorHandle(ctx context.Context, plant *apiv1.Plant, err error) (ctrl.Result, error) {
-	log.FromContext(ctx).Error(err, "Error occurred, rescheduling")
+	log.FromContext(ctx).Error(err, "Error occurred")
 	_ = r.UpdateStatus(ctx, plant, withState(apiv1.StateError)) // we ignore this to avoid wrapping the same error
+	r.Recorder.Eventf(plant, v1.EventTypeWarning, "SyncWithError", "Reprocessing due to Error: %s", err.Error())
 	return ctrl.Result{Requeue: true}, err
 }
 
@@ -160,7 +153,6 @@ func (r *PlantReconciler) HandleProcessingState(ctx context.Context, plant *apiv
 	// Update status (with state) since processing updated it
 	// We ignore the error as it will be self corrected by the requeue
 	uerr := r.UpdateResults(ctx, plant, execResults)
-
 	return plant.Status.State != apiv1.StateReady || uerr != nil, execErr
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	apiv1 "github.com/fhivemind/plant-operator/api/v1"
 	"github.com/fhivemind/plant-operator/pkg/resource"
+	"github.com/fhivemind/plant-operator/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
@@ -32,97 +33,69 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 
 	// Handle child resources
 	for _, res := range results {
-		name := res.Name()
-		obj := res.Object()
+		resObj := res.Object()
+		resType := utils.ObjectType(resObj)
 
-		// Update resource available condition
+		// Get resource status
 		ready := false
-		reason := "WaitingForReadyState"
-		message := fmt.Sprintf("Resource %T is in Not Ready state", obj)
+		reason := "WaitingReadyState"
+		state := apiv1.StateProcessing
+		message := fmt.Sprintf("Resource %s is in Not Ready state", resType)
 
 		switch {
-		case res.Error() != nil: // ERROR STATE
-			message = fmt.Sprintf("Resource %T is in Error state", obj)
+		case res.Errored(): // ERROR STATE
+			state = apiv1.StateError
+			message = fmt.Sprintf("Resource %s is in Error state", resType)
 
-			r.Recorder.Eventf(plant, v1.EventTypeWarning,
-				fmt.Sprintf("%sProcessing", name),
-				"Reprocessing, Executed with error: %v", res.Error(),
-			)
+			r.Recorder.Eventf(plant, v1.EventTypeWarning, "Error", "Rescheduling as %s: %v", message, res.Error())
+			break
 
 		case res.Skipped(): // SKIPPED STATE
 			ready = true
-			reason = "RefreshSkipped"
-			message = fmt.Sprintf("Skipping resource %T as it was not requested", obj)
-
-			r.Recorder.Eventf(plant, v1.EventTypeNormal,
-				fmt.Sprintf("%sProcessing", name),
-				"Change detected, %s", message,
-			)
+			reason = "ProcessingSkipped"
+			state = apiv1.StateReady
+			message = fmt.Sprintf("Resource %s skipped due to conditions", resType)
 
 		case res.Ready(): // READY STATE
 			ready = true
 			reason = "InReadyState"
-			message = fmt.Sprintf("Resource %T is in Ready state", obj)
-
-			if ops := res.ProcessingOps(); len(ops) > 0 {
-				r.Recorder.Eventf(plant, v1.EventTypeNormal,
-					fmt.Sprintf("%sProcessing", name),
-					"Done, %s. Executed %s operation(s)", message, strings.Join(ops, ", "),
-				)
-			} else {
-				r.Recorder.Eventf(plant, v1.EventTypeNormal,
-					fmt.Sprintf("%sProcessing", name),
-					"Done, %s", message,
-				)
-			}
-
-		default: // PROCESSING STATE
-			r.Recorder.Eventf(plant, v1.EventTypeNormal,
-				fmt.Sprintf("%sProcessing", name),
-				"Reprocessing, %s", message,
-			)
-		}
-
-		plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(name), ready, reason, message)
-
-		// Update plant resource status
-		state := apiv1.StateProcessing
-		if res.Error() != nil {
-			state = apiv1.StateError
-		} else if res.Ready() {
 			state = apiv1.StateReady
+			message = fmt.Sprintf("Resource %s is in Ready state", resType)
+			if ops := res.ProcessingOps(); len(ops) > 0 {
+				message = fmt.Sprintf("%s after %s ops", message, strings.Join(ops, ", "))
+			}
 		}
 
-		if !res.Skipped() || obj != nil { // only add non-ignored and non-nil results
+		// Update plant conditions and resources
+		plant.UpdateCondition(apiv1.ConditionTypeAvailableFor(res.Name()), ready, reason, message)
+		if !res.Skipped() || resObj != nil { // only add non-ignored and non-nil results
 			plant.Status.Resources = append(plant.Status.Resources, apiv1.ResourceStatus{
-				Name:  name,
-				GVK:   obj.GetObjectKind().GroupVersionKind().String(),
-				UID:   obj.GetUID(),
+				Name:  res.Name(),
+				GVK:   resObj.GetObjectKind().GroupVersionKind().String(),
+				UID:   resObj.GetUID(),
 				State: state,
 			})
 		}
 	}
 
-	// Handle main state
+	// Update plant main state
 	newState := plant.DetermineState()
-	if newState == apiv1.StateReady && plant.Status.State != apiv1.StateReady {
-		r.Recorder.Event(plant, v1.EventTypeNormal,
-			"Ready",
-			"All done, Plant is in Ready state",
-		)
-	} else if newState != apiv1.StateReady {
+	switch newState {
+	case apiv1.StateReady: // READY STATE
+		if plant.Status.State != apiv1.StateReady { // Plant was not initially in Ready state
+			r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All tasks done, Plant is in Ready state")
+		}
+
+	default: // ANY OTHER STATE FORCES RESYNC
 		eventType := v1.EventTypeNormal
 		if newState == apiv1.StateError {
 			eventType = v1.EventTypeWarning
 		}
-		r.Recorder.Eventf(plant, eventType,
-			"Processing",
-			"Reprocessing, Plant is in %s state due to conditions: %s",
-			newState, strings.Join(plant.GetWaitingConditions(), ", "),
-		)
+		notReadyConds := strings.Join(plant.GetWaitingConditions(), ", ")
+		r.Recorder.Eventf(plant, eventType, "Sync", "Plant is in %s state due to conditions: %s", newState, notReadyConds)
 	}
 
-	// return updated
+	// Return by updating
 	return r.UpdateStatus(ctx, plant, withState(newState))
 }
 

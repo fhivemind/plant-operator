@@ -159,6 +159,10 @@ func (r ExecuteResult) Error() error {
 	return nil
 }
 
+func (r ExecuteResult) Errored() bool {
+	return r.Error() != nil
+}
+
 func (r ExecuteResult) Skipped() bool {
 	return r.op&Skip != 0
 }

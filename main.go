@@ -18,8 +18,9 @@ package main
 
 import (
 	"flag"
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	"github.com/fhivemind/plant-operator/controllers/workflow"
 	"os"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -45,6 +46,8 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(operatorv1.AddToScheme(scheme))
+
+	utilruntime.Must(certv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -79,16 +82,18 @@ func main() {
 	}
 
 	if err = (&controllers.PlantReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Workflow: workflow.NewManager(),
+		Recorder: mgr.GetEventRecorderFor("plant-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plant")
 		os.Exit(1)
 	}
-	if err = (&operatorv1.Plant{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "Plant")
-		os.Exit(1)
-	}
+	//if err = (&operatorv1.Plant{}).SetupWebhookWithManager(mgr); err != nil {
+	//	setupLog.Error(err, "unable to create webhook", "webhook", "Plant")
+	//	os.Exit(1)
+	//}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
