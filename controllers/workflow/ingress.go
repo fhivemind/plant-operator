@@ -53,7 +53,7 @@ func (m *manager) newIngressHandler(plant *apiv1.Plant, tlsSecretName *string) r
 }
 
 func defineIngress(plant *apiv1.Plant, tlsSecretName *string) *networkingv1.Ingress {
-	// Define TLS specs if provided
+	// Defaults
 	var ingressTls []networkingv1.IngressTLS
 	if tlsSecretName != nil {
 		ingressTls = append(ingressTls, networkingv1.IngressTLS{
@@ -62,8 +62,14 @@ func defineIngress(plant *apiv1.Plant, tlsSecretName *string) *networkingv1.Ingr
 		})
 	}
 
-	// Return Ingress
+	containerPort := apiv1.DefaultContainerPort
+	if plant.Spec.ContainerPort != nil {
+		containerPort = *plant.Spec.ContainerPort
+	}
+
 	ingressPathType := networkingv1.PathTypePrefix
+
+	// Return Ingress
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
@@ -86,7 +92,7 @@ func defineIngress(plant *apiv1.Plant, tlsSecretName *string) *networkingv1.Ingr
 										Service: &networkingv1.IngressServiceBackend{
 											Name: plant.Name,
 											Port: networkingv1.ServiceBackendPort{
-												Number: *plant.Spec.ContainerPort,
+												Number: containerPort,
 											},
 										},
 									},

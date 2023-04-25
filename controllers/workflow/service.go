@@ -47,6 +47,13 @@ func (m *manager) newServiceHandler(plant *apiv1.Plant) resource.Executor[*corev
 }
 
 func defineService(plant *apiv1.Plant) *corev1.Service {
+	// Defaults
+	containerPort := apiv1.DefaultContainerPort
+	if plant.Spec.ContainerPort != nil {
+		containerPort = *plant.Spec.ContainerPort
+	}
+
+	// Return Service
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
@@ -57,8 +64,8 @@ func defineService(plant *apiv1.Plant) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{
 					Protocol:   corev1.ProtocolTCP,
-					Port:       *plant.Spec.ContainerPort,
-					TargetPort: intstr.FromInt(int(*plant.Spec.ContainerPort)),
+					Port:       containerPort,
+					TargetPort: intstr.FromInt(int(containerPort)),
 				},
 			},
 			Selector: plant.OperatorLabels(),

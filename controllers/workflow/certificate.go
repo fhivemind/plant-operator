@@ -16,25 +16,17 @@ import (
 // newTlsOrNopHandler creates either a resource.Executor or resource.NopExecutor depending on the state of Plant.
 // Following cases can occur:
 //
-//		 a) No Tls requested, returns nil and resource.NopExecutor
-//		 b) Tls Secret requested, returns plant.Spec.TlsSecretName and resource.NopExecutor
-//	 	 c) CertIssuer requested, returns secret name issued by CertIssuer and certificate handler
+//	a) TlsCertIssuerRef nil, returns TlsSecretName or nil, and resource.NopExecutor
+//	b) TlsCertIssuerRef defined, returns secret name issued by CertIssuer and certificate handler
 //
 // The workflow selection is handled from Plant resource.
 func (m *manager) newTlsOrNopHandler(plant *apiv1.Plant) (*string, resource.Executor[*certv1.Certificate]) {
-	// a) Nothing selected, return nil and nop handler
-	if plant.Spec.TlsSecretName == nil && plant.Spec.TlsCertIssuerRef == nil {
-		return nil, resource.NopExecutor[*certv1.Certificate]("Certificate")
-	}
-
-	// b) Tls only, return the secret name and nop handler
-	if plant.Spec.TlsSecretName != nil {
+	// If no certificate defined, fallback to TlsSecretName (which can be nil) and nop handler.
+	// Otherwise, use TlsCertIssuerRef and create handler.
+	expected := defineOrSkipCertificate(plant)
+	if expected == nil {
 		return plant.Spec.TlsSecretName, resource.NopExecutor[*certv1.Certificate]("Certificate")
 	}
-
-	// c) CertManager only, return certificate secret name and handler
-	// Create expected object
-	expected := defineCertificate(plant)
 	m.Client().Scheme().Default(expected)
 
 	// Return handler
@@ -71,7 +63,13 @@ func (m *manager) newTlsOrNopHandler(plant *apiv1.Plant) (*string, resource.Exec
 	}
 }
 
-func defineCertificate(plant *apiv1.Plant) *certv1.Certificate {
+func defineOrSkipCertificate(plant *apiv1.Plant) *certv1.Certificate {
+	// Skip on empty reference
+	if plant.Spec.TlsCertIssuerRef == nil {
+		return nil
+	}
+
+	// Return Certificate
 	return &certv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,

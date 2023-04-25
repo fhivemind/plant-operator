@@ -25,7 +25,6 @@ import (
 	"io"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"math/rand"
 	"os"
 	"path/filepath"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,12 +49,12 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	Cfg         *rest.Config
+	cfg         *rest.Config
 	PlantClient client.Client
 	TestEnv     *envtest.Environment
 	Ctx         context.Context
 	Cancel      func()
-	Timeout     = time.Second * 15
+	Timeout     = time.Second * 10
 	Interval    = time.Millisecond * 250
 )
 
@@ -66,7 +65,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	Ctx, Cancel = context.WithCancel(context.TODO())
+	Ctx, Cancel = context.WithCancel(context.Background())
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	By("bootstrapping test environment")
@@ -83,7 +82,8 @@ var _ = BeforeSuite(func() {
 	}
 
 	// Cfg is defined in this file globally.
-	cfg, err := TestEnv.Start()
+	var err error
+	cfg, err = TestEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
@@ -126,15 +126,6 @@ var _ = AfterSuite(func() {
 	err := TestEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
-
-func randString(n int) string {
-	letters := "abcdefghijklmnopqrstuvwxyz"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))] //nolint:gosec
-	}
-	return string(b)
-}
 
 func loadExternalCrds(path string, files ...string) []*v1.CustomResourceDefinition {
 	var crds []*v1.CustomResourceDefinition

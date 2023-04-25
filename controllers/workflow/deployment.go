@@ -41,12 +41,23 @@ func (m *manager) newDeploymentHandler(plant *apiv1.Plant) resource.Executor[*ap
 			return false, diff.Error()
 		},
 		IsReady: func(_ context.Context, object *appsv1.Deployment) bool {
-			return object.Status.AvailableReplicas == *plant.Spec.Replicas
+			available := object.Status.AvailableReplicas
+			if plant.Spec.Replicas == nil {
+				return available == apiv1.DefaultReplicaCount
+			}
+			return available == *plant.Spec.Replicas
 		},
 	}
 }
 
 func defineDeployment(plant *apiv1.Plant) *appsv1.Deployment {
+	// Defaults
+	containerPort := apiv1.DefaultContainerPort
+	if plant.Spec.ContainerPort != nil {
+		containerPort = *plant.Spec.ContainerPort
+	}
+
+	// Return Deployment
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plant.Name,
@@ -70,7 +81,7 @@ func defineDeployment(plant *apiv1.Plant) *appsv1.Deployment {
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Ports: []corev1.ContainerPort{
 								{
-									ContainerPort: *plant.Spec.ContainerPort,
+									ContainerPort: containerPort,
 								},
 							},
 						},
