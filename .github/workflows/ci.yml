@@ -91,6 +91,7 @@ jobs:
         with:
           filename: coverage.xml
           format: markdown
+          output: both
 
       - name: Post - Add to PR Comment
         uses: marocchino/sticky-pull-request-comment@v2
