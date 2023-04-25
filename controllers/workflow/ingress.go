@@ -8,6 +8,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -35,8 +36,8 @@ func (m *manager) newIngressHandler(plant *apiv1.Plant, tlsSecretName *string) r
 		},
 		UpdateFunc: func(ctx context.Context, object *networkingv1.Ingress) (bool, error) {
 			structDiff := utils.Diff(&expected.Spec, &object.Spec)
-			tlsChanged := !utils.DeepEqual(expected.Spec.TLS, object.Spec.TLS)
-			ingressClassChanged := !utils.DeepEqual(expected.Spec.IngressClassName, object.Spec.IngressClassName)
+			tlsChanged := !reflect.DeepEqual(expected.Spec.TLS, object.Spec.TLS)
+			ingressClassChanged := !reflect.DeepEqual(expected.Spec.IngressClassName, object.Spec.IngressClassName)
 			if structDiff.NotEqual() || tlsChanged || ingressClassChanged {
 				expected.Spec.DeepCopyInto(&object.Spec)
 				utils.MergeMapsSrcDst(expected.Labels, object.Labels)

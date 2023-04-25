@@ -82,11 +82,9 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 	newState := plant.DetermineState()
 	switch newState {
 	case apiv1.StateReady: // READY STATE
-		if plant.Status.State != apiv1.StateReady { // Plant was not initially in Ready state
-			r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All tasks done, Plant is in Ready state")
-		}
+		r.Recorder.Event(plant, v1.EventTypeNormal, "Ready", "All tasks done, Plant is in Ready state")
 
-	default: // ANY OTHER STATE FORCES RESYNC
+	default: // ANY OTHER STATE FORCES RSYNC
 		eventType := v1.EventTypeNormal
 		if newState == apiv1.StateError {
 			eventType = v1.EventTypeWarning
