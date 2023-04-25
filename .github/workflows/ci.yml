@@ -158,6 +158,6 @@ jobs:
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: jasonetco/upload-to-release@v0.1.1
         with:
-          args: release/${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yaml
+          args: release/${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yaml text/plain
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
