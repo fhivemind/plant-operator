@@ -108,6 +108,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Configure Go
+        id: go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          check-latest: true
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
@@ -143,9 +150,9 @@ jobs:
       - name: Release - Generate artifacts
         if: github.event_name == 'release' && github.event.action == 'published'
         run: |
-          make release \ 
-            IMG=${{ env.DOCKERHUB_REPO }}/${{ env.RELEASE_NAME }}:${{ github.event.release.name }} \
-            RELEASE_NAME=${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yml
+          make release \
+            IMG="${{ env.DOCKERHUB_REPO }}/${{ env.RELEASE_NAME }}:${{ github.event.release.name }}" \
+            RELEASE_NAME="${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yaml"
 
       - name: Release - Upload artifacts
         if: github.event_name == 'release' && github.event.action == 'published'

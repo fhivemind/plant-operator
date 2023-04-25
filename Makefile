@@ -132,7 +132,7 @@ undeps: manifests kustomize ## Remove dependencies from kubernetes cluster.
 .PHONY: release
 release: manifests kustomize ## Creates release files
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	mkdir -p release/
+	mkdir -p release
 	$(KUSTOMIZE) build config/default > release/${RELEASE_NAME}
 
 ##@ Build Dependencies
