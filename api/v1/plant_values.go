@@ -12,12 +12,13 @@ var (
 	ManagedByLabel = GroupName + "/" + "managed-by" // ManagedByLabel defines a kind-based owner label
 	OwnerNameLabel = GroupName + "/" + "owner-name" // OwnerNameLabel defines a resource-based owner label
 
-	OperatorPlant = "plant-operator" // OperatorPlant exports Plant operator name
+	PlantKind     = "Plant"          // PlantKind exports Plant operator kind
+	PlantOperator = "plant-operator" // PlantOperator exports Plant operator name
 )
 
 func (plant *Plant) OperatorLabels() map[string]string {
 	labels := make(map[string]string)
-	labels[ManagedByLabel] = OperatorPlant
+	labels[ManagedByLabel] = PlantOperator
 	labels[OwnerNameLabel] = plant.Name
 	return labels
 }

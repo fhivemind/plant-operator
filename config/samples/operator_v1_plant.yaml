@@ -12,7 +12,7 @@ spec:
   # TODO(user): Add fields here
   image: "dockerbogo/docker-nginx-hello-world:latest"
   containerPort: 80
-  replicas: 4
+  replicas: 2
   host: "example.localhost3"
   ingressClassName: "nginx"
   # tlsSecretName: "ingress-tls"

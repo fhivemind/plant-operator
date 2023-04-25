@@ -121,11 +121,11 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 .PHONY: deps
 deps: manifests kustomize ## Deploy dependencies to kubernetes cluster.
-	$(KUSTOMIZE) build config/deps | kubectl apply -f -
+	$(KUSTOMIZE) build config/samples/test | kubectl apply -f -
 
 .PHONY: undeps
 undeps: manifests kustomize ## Remove dependencies from kubernetes cluster.
-	$(KUSTOMIZE) build config/deps | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+	$(KUSTOMIZE) build config/samples/test | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 
 ##@ Build Dependencies

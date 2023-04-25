@@ -15,19 +15,16 @@ import (
 func notifyWrapper(recorder record.EventRecorder, wrap predicate.Predicate) predicate.Funcs {
 	withMsg := func(should bool, eventType string, obj client.Object) bool {
 		if should {
-			recorder.Eventf(obj, corev1.EventTypeNormal,
-				"Sync",
-				"Triggered for %s on resource %s", eventType, utils.ObjectType(obj),
-			)
+			recorder.Eventf(obj, corev1.EventTypeNormal, "Sync", "Triggered for %s", eventType)
 		}
 		return should
 	}
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			return withMsg(wrap.Create(e), "create event", e.Object)
+			return withMsg(wrap.Create(e), "Create event", e.Object)
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			return withMsg(wrap.Delete(e), "delete event", e.Object)
+			return withMsg(wrap.Delete(e), "Delete event", e.Object)
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			// get diff between objects
@@ -36,13 +33,13 @@ func notifyWrapper(recorder record.EventRecorder, wrap predicate.Predicate) pred
 				mapDiff, err := utils.UnsafeMapDiff(&e.ObjectOld.(*apiv1.Plant).Spec, &e.ObjectNew.(*apiv1.Plant).Spec)
 				different := mapDiff.Values(true, false) // get only different values
 				if err == nil && len(different) > 0 {
-					eventInfo = fmt.Sprintf("update event with changes: %s", different)
+					eventInfo = fmt.Sprintf("Update event with %s", different)
 				}
 			}
 			return withMsg(wrap.Update(e), eventInfo, e.ObjectNew)
 		},
 		GenericFunc: func(e event.GenericEvent) bool {
-			return withMsg(wrap.Generic(e), "generic event", e.Object)
+			return withMsg(wrap.Generic(e), "Generic event", e.Object)
 		},
 	}
 }

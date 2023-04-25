@@ -14,11 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package controllers_test
 
 import (
+	"context"
+	"errors"
+	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	"github.com/fhivemind/plant-operator/controllers"
+	"github.com/fhivemind/plant-operator/controllers/workflow"
+	"io"
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	"math/rand"
+	"os"
 	"path/filepath"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -34,12 +46,18 @@ import (
 	//+kubebuilder:scaffold:imports
 )
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
+// These test use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var (
+	Cfg         *rest.Config
+	PlantClient client.Client
+	TestEnv     *envtest.Environment
+	Ctx         context.Context
+	Cancel      func()
+	Timeout     = time.Second * 15
+	Interval    = time.Millisecond * 250
+)
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -48,33 +66,93 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	Ctx, Cancel = context.WithCancel(context.TODO())
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	By("bootstrapping test environment")
-	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+
+	TestEnv = &envtest.Environment{
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "config", "crd", "bases"),
+		},
+		CRDs: loadExternalCrds(
+			filepath.Join("..", "config", "samples", "test", "crds"),
+			"cert-manager.v1.11.0.crds.yaml",
+		),
 		ErrorIfCRDPathMissing: true,
 	}
 
-	var err error
-	// cfg is defined in this file globally.
-	cfg, err = testEnv.Start()
+	// Cfg is defined in this file globally.
+	cfg, err := TestEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = operatorv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	// register test
+	Expect(operatorv1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
+	Expect(certv1.AddToScheme(scheme.Scheme)).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
 
-	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	// create manager
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
 
+	// configure reconciler
+	err = (&controllers.PlantReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Workflow: workflow.NewManager(),
+		Recorder: mgr.GetEventRecorderFor("plant-controller"),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	// set client
+	PlantClient = mgr.GetClient()
+	Expect(err).NotTo(HaveOccurred())
+	Expect(PlantClient).NotTo(BeNil())
+
+	// configure start
+	go func() {
+		defer GinkgoRecover()
+		err = mgr.Start(Ctx)
+		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
+	}()
 })
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
-	err := testEnv.Stop()
+	Cancel()
+
+	err := TestEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+func randString(n int) string {
+	letters := "abcdefghijklmnopqrstuvwxyz"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))] //nolint:gosec
+	}
+	return string(b)
+}
+
+func loadExternalCrds(path string, files ...string) []*v1.CustomResourceDefinition {
+	var crds []*v1.CustomResourceDefinition
+	for _, file := range files {
+		crdPath := filepath.Join(path, file)
+		moduleFile, err := os.Open(crdPath)
+		Expect(err).ToNot(HaveOccurred())
+		decoder := yaml.NewYAMLOrJSONDecoder(moduleFile, 2048)
+		for {
+			crd := &v1.CustomResourceDefinition{}
+			if err = decoder.Decode(crd); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				continue
+			}
+			crds = append(crds, crd)
+		}
+	}
+	return crds
+}

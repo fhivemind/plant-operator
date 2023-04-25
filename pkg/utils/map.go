@@ -14,7 +14,7 @@ func MergeMapsSrcDst(from, to map[string]string) {
 }
 
 // UnsafeMapDiff just returns a diff between two objects. Must pass a reference.
-// TODO: Resolve this for better usage
+// TODO: Resolve this for better usage by adding depth/recursive search
 func UnsafeMapDiff(objA, objB interface{}) (diffValues, error) {
 	a, err := runtime.DefaultUnstructuredConverter.ToUnstructured(objA)
 	if err != nil {

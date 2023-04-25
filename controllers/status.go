@@ -90,7 +90,7 @@ func (r *PlantReconciler) UpdateResults(ctx context.Context, plant *apiv1.Plant,
 			eventType = v1.EventTypeWarning
 		}
 		notReadyConds := strings.Join(plant.GetWaitingConditions(), ", ")
-		r.Recorder.Eventf(plant, eventType, "Sync", "Plant is in %s state due to conditions: %s", newState, notReadyConds)
+		r.Recorder.Eventf(plant, eventType, "WaitingReadyState", "Plant is in %s state due to conditions: %s", newState, notReadyConds)
 	}
 
 	// Return by updating
