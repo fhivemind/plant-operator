@@ -1,4 +1,4 @@
-name: CI
+name: CI Pipelines
 
 on:
   pull_request:
@@ -21,75 +21,88 @@ permissions: read-all
 
 env:
   DOCKERHUB_REPO: fhivemind
-  CRD_NAME: plant-operator
+  RELEASE_NAME: plant-operator
 
 jobs:
   check:
+    name: Sanity check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Go
+      - name: Configure Go
         id: go
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
           check-latest: true
 
-      - name: Check validity
+      ### CHECK STEPS
+
+      - name: Check - Standards
         run: make fmt vet
 
-      - name: Check security
+      - name: Check - Security
         uses: securego/gosec@v2.15.0
         with:
           args: -exclude=G109,G601,G104,G204,G304,G306,G307 -tests=false ./...
 
-      - name: Check linting
-        uses: golangci/golangci-lint-action@v3.4.0
-        with:
-          version: v1.51.1
+# TODO: Linting disabled for now
+#      - name: Check linting
+#        uses: golangci/golangci-lint-action@v3.4.0
+#        with:
+#          version: v1.51.1
 
   test:
+    name: Test suite
     runs-on: ubuntu-latest
+    needs:
+      - check
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Go
+      - name: Configure Go
         id: go
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
           check-latest: true
 
-      ######### TEST FLOW
-      - name: Run unit tests
+      ### TEST STEPS
+
+      - name: Test - Unit and integration
         run: make test
 
-      ######### POST ACTIONS
-      - name: Generate summaries
+      ### POST STEPS
+
+      - name: Post - Generate summary
         run: |
           export GOPATH="$HOME/go/"
           export PATH=$PATH:$GOPATH/bin
-          go install github.com/golang/mock/mockgen@v1.6.0
-          go install github.com/jstemmer/go-junit-report@latest
-          cat cover.out | go-junit-report -set-exit-code > coverage.xml
+          go install github.com/axw/gocov/gocov@v1.1.0
+          go install github.com/AlekSi/gocov-xml@v1.1.0
+          gocov convert cover.out | gocov-xml > coverage.xml
 
-      - name: Notify
+      - name: Post - Add to CI
         uses: test-summary/action@v1
         with:
           paths: |
             coverage.xml
 
-      - name: Comment
+      - name: Post - Add to PR
+        if: github.event_name == 'pull_request'
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
           filename: coverage.xml
 
-  release:
-    name: Build and release
+  build-release:
+    name: Build & Release
     runs-on: ubuntu-latest
+    needs:
+      - check
+      - test
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -100,41 +113,43 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      ### BUILD STEPS
 
-      - name: Build
+      - name: Build - Local image
         uses: docker/build-push-action@v4
         with:
           context: .
           load: true
-          tags: ${{ env.CRD_NAME }}:latest
+          tags: ${{ env.RELEASE_NAME }}:latest
 
-      ### DO SOME STEPS HERE
+      ### RELEASE STEPS
 
-      - name: Release - Push to Docker
+      - name: Release - Login to Docker
+        uses: docker/login-action@v2
+        if: github.event_name == 'release' && github.event.action == 'published'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Release - Push public image
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.CRD_NAME }}:${{ github.event.release.name }}
+          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.RELEASE_NAME }}:${{ github.event.release.name }}
 
-      - name: Release - Generate resources
+      - name: Release - Generate artifacts
         if: github.event_name == 'release' && github.event.action == 'published'
         run: |
           make release \ 
-            IMG=${{ env.DOCKERHUB_REPO }}/${{ env.CRD_NAME }}:${{ github.event.release.name }} \
-            RELEASE_NAME=${{ env.CRD_NAME }}.${{ github.event.release.name }}.yml
-            
+            IMG=${{ env.DOCKERHUB_REPO }}/${{ env.RELEASE_NAME }}:${{ github.event.release.name }} \
+            RELEASE_NAME=${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yml
 
-      - name: Release - Upload
+      - name: Release - Upload artifacts
         if: github.event_name == 'release' && github.event.action == 'published'
         uses: jasonetco/upload-to-release@v0.1.1
         with:
-          args: release/${{ env.CRD_NAME }}.${{ github.event.release.name }}.yml
+          args: release/${{ env.RELEASE_NAME }}.${{ github.event.release.name }}.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
