@@ -21,7 +21,7 @@ permissions: read-all
 
 env:
   DOCKERHUB_REPO: fhivemind
-  IMAGE_NAME: plant-builder
+  CRD_NAME: plant-operator
 
 jobs:
   check:
@@ -111,17 +111,30 @@ jobs:
         with:
           context: .
           load: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.CRD_NAME }}:latest
 
       ### DO SOME STEPS HERE
 
       - name: Release - Push to Docker
-        uses: docker/build-push-action@v4
         if: github.event_name == 'release' && github.event.action == 'published'
+        uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}:${{ github.event.release.name }}
+          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.CRD_NAME }}:${{ github.event.release.name }}
 
-      - name: Release - Add resources
-        run: make test
+      - name: Release - Generate resources
+        if: github.event_name == 'release' && github.event.action == 'published'
+        run: |
+          make release \ 
+            IMG=${{ env.DOCKERHUB_REPO }}/${{ env.CRD_NAME }}:${{ github.event.release.name }} \
+            RELEASE_NAME=${{ env.CRD_NAME }}.${{ github.event.release.name }}.yml
+            
+
+      - name: Release - Upload
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: jasonetco/upload-to-release@v0.1.1
+        with:
+          args: release/${{ env.CRD_NAME }}.${{ github.event.release.name }}.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

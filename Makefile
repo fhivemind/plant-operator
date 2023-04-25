@@ -1,6 +1,8 @@
 
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+RELEASE_NAME ?= controller.crd.yml
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.26.0
 
@@ -127,6 +129,11 @@ deps: manifests kustomize ## Deploy dependencies to kubernetes cluster.
 undeps: manifests kustomize ## Remove dependencies from kubernetes cluster.
 	$(KUSTOMIZE) build config/samples/test | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
+.PHONY: release
+release: manifests kustomize ## Creates release files
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	mkdir -p release/
+	$(KUSTOMIZE) build config/default > release/${RELEASE_NAME}
 
 ##@ Build Dependencies
 
