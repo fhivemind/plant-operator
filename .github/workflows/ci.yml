@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - "*"
+    paths-ignore:
+      - '*.md'
+  push:
+    branches:
+      - main
+
+  release:
+    types: [published]
+
+permissions: read-all
+
+## Variable list
+# secret.DOCKERHUB_USERNAME
+# secret.DOCKERHUB_TOKEN
+
+env:
+  DOCKERHUB_REPO: fhivemind
+  IMAGE_NAME: plant-builder
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          check-latest: true
+
+      - name: Check validity
+        run: make fmt vet
+
+      - name: Check security
+        uses: securego/gosec@v2.15.0
+        with:
+          args: -exclude=G109,G601,G104,G204,G304,G306,G307 -tests=false ./...
+
+      - name: Check linting
+        uses: golangci/golangci-lint-action@v3.4.0
+        with:
+          version: v1.51.1
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          check-latest: true
+
+      ######### TEST FLOW
+      - name: Run unit tests
+        run: make test
+
+      ######### POST ACTIONS
+      - name: Generate summaries
+        run: |
+          export GOPATH="$HOME/go/"
+          export PATH=$PATH:$GOPATH/bin
+          go install github.com/golang/mock/mockgen@v1.6.0
+          go install github.com/jstemmer/go-junit-report@latest
+          cat cover.out | go-junit-report -set-exit-code > coverage.xml
+
+      - name: Notify
+        uses: test-summary/action@v1
+        with:
+          paths: |
+            coverage.xml
+
+      - name: Comment
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: coverage.xml
+
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:latest
+
+      ### DO SOME STEPS HERE
+
+      - name: Release - Push to Docker
+        uses: docker/build-push-action@v4
+        if: github.event_name == 'release' && github.event.action == 'published'
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}:${{ github.event.release.name }}
+
+      - name: Release - Add resources
+        run: make test
