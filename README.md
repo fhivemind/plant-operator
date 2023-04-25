@@ -57,7 +57,7 @@ To install Plant Operator, simply run:
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.11.0/cert-manager.yaml
 
 ### Install Plant Operator  
-kubectl apply -f https://github.com/fhivemind/plant-operator/releases/download/v1.0.0/plant.yaml
+kubectl apply -f https://github.com/fhivemind/plant-operator/releases/download/v1.0.0/plant-operator.v1.0.0.yaml
 ```
 
 You don't need to change any resources of the plant-operator install parameters.
