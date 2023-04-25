@@ -35,7 +35,7 @@ func (r *Plant) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-//+kubebuilder:webhook:path=/mutate-operator-cisco-io-v1-plant,mutating=true,failurePolicy=fail,sideEffects=None,groups=operator.cisco.io,resources=plants,verbs=create;update,versions=v1,name=mplant.kb.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/mutate-operator-fhivemind-io-v1-plant,mutating=true,failurePolicy=fail,sideEffects=None,groups=operator.fhivemind.io,resources=plants,verbs=create;update,versions=v1,name=mplant.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Defaulter = &Plant{}
 
@@ -57,7 +57,7 @@ func (r *Plant) Default() {
 }
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-//+kubebuilder:webhook:path=/validate-operator-cisco-io-v1-plant,mutating=false,failurePolicy=fail,sideEffects=None,groups=operator.cisco.io,resources=plants,verbs=create;update,versions=v1,name=vplant.kb.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/validate-operator-fhivemind-io-v1-plant,mutating=false,failurePolicy=fail,sideEffects=None,groups=operator.fhivemind.io,resources=plants,verbs=create;update,versions=v1,name=vplant.kb.io,admissionReviewVersions=v1
 
 var _ webhook.Validator = &Plant{}
 

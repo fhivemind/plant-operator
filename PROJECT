@@ -3,7 +3,7 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 componentConfig: true
-domain: cisco.io
+domain: fhivemind.io
 layout:
 - go.kubebuilder.io/v3
 projectName: plant-operator
@@ -13,7 +13,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: cisco.io
+  domain: fhivemind.io
   group: operator
   kind: Plant
   path: github.com/fhivemind/plant-operator/api/v1

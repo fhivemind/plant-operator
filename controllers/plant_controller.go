@@ -32,9 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-//+kubebuilder:rbac:groups=operator.cisco.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=operator.cisco.io,resources=plants/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=operator.cisco.io,resources=plants/finalizers,verbs=update
+//+kubebuilder:rbac:groups=operator.fhivemind.io,resources=plants,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=operator.fhivemind.io,resources=plants/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=operator.fhivemind.io,resources=plants/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
